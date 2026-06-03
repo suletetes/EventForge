@@ -45,3 +45,4 @@ __pycache__/
 .gitignore
 .kiro/specs/
 docs/generate_architecture_diagram.py
+eventforge-spec.md

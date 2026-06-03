@@ -1,60 +1,46 @@
 # @eventforge/lambdas
 
-All Lambda functions for the EventForge platform: workflow steps, background processors, and webhook ingestion.
+All the Lambda functions. Workflow steps, background processors, and the webhook ingestion handler.
 
-## Functions
+## Workflow steps
 
-### Workflow Steps (Step Functions)
+These get called by Step Functions in sequence. Each one receives the full order context (orderId, userId, items, total) and passes it along.
 
-Invoked by the Order Workflow state machine in sequence. Each receives and passes through the full order context.
+| Function | What it does |
+|----------|-------------|
+| validate-order | Checks order exists in DynamoDB, validates structure |
+| reserve-inventory | Conditional write to mark items as reserved |
+| charge-payment | Simulates payment. Fails if total > 500K (triggers compensation) |
+| confirm-order | Sets status to completed, publishes order.completed event |
+| release-inventory | Compensation step. Undoes the reservation on failure |
+| order-failed | Persists status = failed in DynamoDB |
 
-| Function | Timeout | Memory | Purpose |
-|----------|---------|--------|---------|
-| validate-order | 10s | 128 MB | Validate order exists and has valid structure |
-| reserve-inventory | 10s | 128 MB | DynamoDB conditional write to reserve items |
-| charge-payment | 30s | 256 MB | Simulate payment gateway (fails if total > 500K) |
-| confirm-order | 10s | 128 MB | Update status to completed, emit order.completed |
-| release-inventory | 10s | 128 MB | Compensation: release reserved items on failure |
-| order-failed | 10s | 128 MB | Persist failure status in DynamoDB |
+If charge or confirm fails after inventory is reserved, the state machine routes to release-inventory first. That's the saga pattern.
 
-### Background Processors (SQS-triggered)
+## Background processors
 
-| Function | Queue | Timeout | Memory | Max Receives | Behavior on Failure |
-|----------|-------|---------|--------|--------------|---------------------|
-| email-processor | email-queue | 30s | 128 MB | 3 | Throw → SQS retry → DLQ |
-| pdf-processor | pdf-queue | 60s | 512 MB | 3 | Throw → SQS retry → DLQ |
-| webhook-processor | webhook-queue | 30s | 128 MB | 5 | Any URL fails → throw → full retry |
+Triggered by SQS. Each processes one message at a time (batch size 1).
 
-### Ingestion
+| Function | Queue | Timeout | Memory | Retries before DLQ |
+|----------|-------|---------|--------|-------------------|
+| email-processor | email-queue | 30s | 128 MB | 3 |
+| pdf-processor | pdf-queue | 60s | 512 MB | 3 |
+| webhook-processor | webhook-queue | 30s | 128 MB | 5 |
 
-| Function | Trigger | Purpose |
-|----------|---------|---------|
-| webhook-ingest | API Gateway HTTP API | Validate & publish external events to EventBridge |
+The webhook processor has a specific rule: if any registered URL fails delivery, it throws so the entire message retries on all URLs. No partial delivery.
 
-## Project Structure
+## Ingestion
+
+`webhook-ingest` handles POST /webhooks/ingest via API Gateway. Validates the payload (must have source, detail-type, detail fields, under 256 KB), publishes to EventBridge, returns 202.
+
+## Structure
 
 ```
-packages/lambdas/src/
-├── workflow/
-│   ├── validate-order.ts
-│   ├── reserve-inventory.ts
-│   ├── charge-payment.ts
-│   ├── confirm-order.ts
-│   ├── release-inventory.ts
-│   └── order-failed.ts
-├── processors/
-│   ├── email-processor.ts
-│   ├── pdf-processor.ts
-│   └── webhook-processor.ts
-└── ingestion/
-    └── webhook-ingest.ts
+src/
+├── workflow/           Step Functions handlers
+├── processors/         SQS-triggered handlers
+└── ingestion/          API Gateway handler
 ```
-
-## Error Handling
-
-- **Workflow steps**: Throw errors that Step Functions catches. Retry and compensation configured in the ASL definition.
-- **SQS processors**: Throw on any failure. SQS handles retry via visibility timeout. After max receives, messages go to DLQ.
-- **Webhook processor**: If ANY registered URL fails delivery, throws to retry the entire message on ALL URLs.
 
 ## Tests
 
@@ -62,4 +48,4 @@ packages/lambdas/src/
 npm test -- --testPathPattern="packages/lambdas"
 ```
 
-Includes property-based tests for saga compensation, context preservation, and webhook retry behavior.
+Includes property tests for saga compensation, context preservation, and the webhook retry behavior.

@@ -1,147 +1,112 @@
 # EventForge
 
-A hybrid event processing platform that demonstrates when to use **containers** (ECS Fargate) versus **serverless** (Lambda) in the same system. Built for AWS with TypeScript throughout.
+I built this to answer the question every AWS interview asks: when do you use containers, and when do you use serverless?
 
-The API layer runs on ECS Fargate for consistent sub-200ms responses. Background processing runs on Lambda triggered by SQS queues for scale-to-zero economics. Step Functions orchestrates multi-step order workflows using the saga pattern with compensation.
+The answer is "both, in the same system." The API runs on ECS Fargate because it needs consistent sub-200ms responses with no cold starts. Background processing runs on Lambda because those tasks are bursty and benefit from scale-to-zero. This project puts them together in a realistic e-commerce order processing platform.
 
 ## Architecture
 
-EventForge is split into three architectural layers. Each diagram below shows one layer in detail.
+I split the architecture into three diagrams because one giant diagram is unreadable.
 
-### Request Flow
+### Request flow
 
-Users interact with the platform through a React dashboard (S3/CloudFront) and the REST API (ECS Fargate behind ALB). All state changes publish events to a central EventBridge bus. External systems push events via API Gateway.
+How a user's request gets from the browser to the database and back. The API publishes every state change to EventBridge, which decouples everything downstream.
 
 ![Request Flow](docs/eventforge-1-request-flow.png)
 
-### Order Processing Workflow
+### Order processing workflow
 
-When an order is created, EventBridge triggers a Step Functions state machine that executes the saga pattern: Validate → Reserve Inventory → Charge Payment → Confirm. If any step fails after inventory is reserved, the workflow compensates by releasing inventory before marking the order as failed.
+The interesting part. Step Functions runs a saga: Validate, Reserve Inventory, Charge Payment, Confirm. If payment fails after inventory is reserved, the workflow compensates by releasing the reservation before marking the order as failed.
 
 ![Order Workflow](docs/eventforge-2-order-workflow.png)
 
-### Background Processing & Observability
+### Background processing and observability
 
-Completed orders fan out to SQS queues for email confirmation, PDF receipt generation, and webhook delivery. Each queue has a dead-letter queue with CloudWatch alarms. X-Ray traces the full request path across all services.
+After an order completes, EventBridge fans out to three SQS queues. Lambda processors handle email, PDF receipts, and webhook delivery. Each queue has a dead letter queue with CloudWatch alarms. X-Ray traces everything.
 
 ![Background Processing](docs/eventforge-3-background-processing.png)
 
-## Why Containers AND Serverless
+## Why both containers and serverless
 
-| Concern | ECS Fargate | Lambda |
-|---------|-------------|--------|
+| | ECS Fargate | Lambda |
+|--|-------------|--------|
 | API responses | Consistent sub-200ms, no cold starts | Cold starts add 500ms-3s |
-| Always-on traffic | Predictable cost at sustained load | Expensive at high RPS |
-| Background processing | Over-provisioned, paying for idle | Scale to zero, pay per invocation |
-| Bursty workloads | Slow to scale (minutes) | Instant scale (milliseconds) |
+| Sustained traffic | Predictable cost | Expensive at high RPS |
+| Background tasks | Paying for idle time | Scale to zero, pay per invocation |
+| Burst scaling | Takes minutes | Takes milliseconds |
 
-EventForge uses both correctly: **Fargate for the API** (latency-sensitive, always-on) and **Lambda for background tasks** (bursty, event-driven).
+Fargate for the API. Lambda for the background work. That's the whole insight.
 
-## Tech Stack
+## What's in here
 
-| Layer | Technology |
-|-------|-----------|
+| Layer | What |
+|-------|------|
 | API | TypeScript, Express, ECS Fargate |
-| Event Processors | TypeScript Lambda functions |
-| Workflow | Step Functions (saga pattern) |
-| Event Bus | EventBridge (custom bus) |
-| Queues | SQS (standard + DLQ) |
-| Database | DynamoDB (single-table, on-demand) |
-| Auth | Cognito (JWT) |
-| Frontend | React (S3 + CloudFront) |
-| Observability | X-Ray + CloudWatch Alarms |
-| IaC | AWS SAM / CloudFormation |
+| Event processors | TypeScript Lambda functions |
+| Workflow | Step Functions (saga pattern with compensation) |
+| Event bus | EventBridge custom bus |
+| Queues | SQS with dead letter queues |
+| Database | DynamoDB single table design, on-demand |
+| Auth | Cognito JWT tokens |
+| Frontend | React on S3/CloudFront |
+| Observability | X-Ray tracing, CloudWatch alarms |
+| Infrastructure | AWS SAM / CloudFormation, nested stacks |
 
-## Project Structure
+## Project structure
 
 ```
 EventForge/
 ├── packages/
-│   ├── api/          # Express REST API (ECS Fargate)
-│   ├── lambdas/      # All Lambda functions (workflow + processors)
-│   ├── shared/       # DynamoDB data layer, types, utilities
-│   ├── frontend/     # React dashboard
-│   └── infra/        # SAM/CloudFormation templates
-├── docs/             # Architecture diagrams (code + images)
-├── template.yaml     # Root SAM template (nested stacks)
-├── jest.config.js    # Test configuration
-└── tsconfig.json     # TypeScript project references
+│   ├── api/          Express REST API (runs on ECS Fargate)
+│   ├── lambdas/      All Lambda functions
+│   ├── shared/       DynamoDB data layer, types, utilities
+│   ├── frontend/     React dashboard
+│   └── infra/        SAM/CloudFormation templates
+├── docs/             Architecture diagrams (code + images)
+├── template.yaml     Root SAM template (deploys everything)
+├── jest.config.js    Test config
+└── tsconfig.json     TypeScript project references
 ```
 
-## Quick Start
+## Getting started
 
-### Prerequisites
-
-- Node.js 20+
-- AWS CLI configured
-- AWS SAM CLI
-- Docker (for local ECS testing)
-
-### Install & Build
+You need Node.js 20+, AWS CLI, AWS SAM CLI, and Docker.
 
 ```bash
 npm install
 npm run build
+npm test          # 343 tests, including property-based tests
+sam deploy --guided
 ```
 
-### Run Tests
+The root `template.yaml` deploys all infrastructure in dependency order via nested stacks. One command.
+
+## API
+
+| Method | Path | What it does |
+|--------|------|-------------|
+| POST | /api/orders | Create an order, publishes order.created event |
+| GET | /api/orders | Your orders, sorted by date, max 50 |
+| GET | /api/orders/:id | Order details with full event history |
+| GET | /api/orders/:id/receipt | Presigned URL for the PDF receipt |
+| POST | /api/webhooks | Register a URL to receive events |
+| GET | /api/events | Recent events for the dashboard, max 100 |
+| GET | /health | Health check, no auth needed |
+| POST | /webhooks/ingest | External event ingestion (via API Gateway) |
+
+All endpoints except /health and /webhooks/ingest require a Cognito JWT.
+
+## What it costs
+
+About $35/month in dev with two Fargate tasks running. Most of that is the ALB ($16) and Fargate ($18). Everything else falls under free tier at low traffic. Tear down ECS and the ALB when you're not using it to stay under $5.
+
+## Tests
+
+343 tests across 35 suites. 19 of those are property-based tests using fast-check with 100 random inputs each. They verify things like "for any valid order, the system always produces a pending record and an event" and "if any webhook URL fails, the processor retries all of them."
 
 ```bash
 npm test
 ```
-
-343 tests across 35 suites, including 19 property-based tests (100 iterations each).
-
-### Deploy
-
-```bash
-sam deploy --guided
-```
-
-The root `template.yaml` deploys all infrastructure in the correct dependency order via nested stacks.
-
-## API Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | /api/orders | Create order (publishes order.created event) |
-| GET | /api/orders | List user's orders (max 50, sorted desc) |
-| GET | /api/orders/:id | Get order with event history |
-| GET | /api/orders/:id/receipt | Presigned URL for PDF receipt |
-| POST | /api/webhooks | Register webhook URL for delivery |
-| GET | /api/events | Recent events (max 100, for dashboard) |
-| GET | /health | Health check (no auth) |
-| POST | /webhooks/ingest | External event ingestion (API Gateway) |
-
-## Key AWS Services
-
-- **ECR + ECS Fargate** — Container registry and API runtime
-- **ALB** — Load balancing with health checks
-- **Lambda** — Event processors and workflow steps
-- **Step Functions** — Order workflow orchestration
-- **EventBridge** — Central event bus with content-based routing
-- **SQS** — Queue decoupling with dead-letter queues
-- **DynamoDB** — Single-table design with GSIs
-- **Cognito** — User authentication (JWT)
-- **S3 + CloudFront** — Frontend hosting and receipt storage
-- **X-Ray** — Distributed tracing
-- **CloudWatch** — Alarms on DLQ depth
-
-## Cost Estimate
-
-| Resource | Monthly (dev) | Free Tier |
-|----------|--------------|-----------|
-| ECS Fargate (2 tasks) | ~$18 | No |
-| ALB | ~$16 | No |
-| Lambda | ~$0 | 1M requests |
-| Step Functions | ~$0 | 4K transitions |
-| EventBridge | ~$0 | 14M events |
-| SQS | ~$0 | 1M requests |
-| DynamoDB | ~$0 | 25 GB |
-| **Total** | **~$35/month** | |
-
-Tear down ECS + ALB when not using to stay under $5/month.
-
 
 ## License
 

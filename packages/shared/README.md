@@ -1,54 +1,49 @@
 # @eventforge/shared
 
-Shared data layer, types, and utilities used across the API service and Lambda functions.
+The data layer. Key construction utilities, order repository, event repository. Used by both the API and the Lambda functions.
 
-## What's in Here
+## DynamoDB table design
 
-### DynamoDB Key Construction (`dynamo-keys.ts`)
+Single table called `eventforge-events`. On-demand billing. Everything goes in here:
 
-Utility functions for building partition/sort keys following the single-table design:
+| What | PK | SK |
+|------|----|----|
+| Order | ORDER#{orderId} | METADATA |
+| Order event | ORDER#{orderId} | EVENT#{timestamp}#{eventId} |
+| User's orders | USER#{userId} | ORDER#{orderId} |
+| Idempotency lock | IDEMPOTENCY#{key} | LOCK (TTL: 24h) |
+
+Two GSIs:
+- GSI1: status + createdAt (find orders by status)
+- GSI2: userId + createdAt (user's order history, sorted)
+
+## What's exported
+
+### Key utilities (`dynamo-keys.ts`)
 
 ```typescript
-orderKey("abc123")        // → "ORDER#abc123"
-orderMetadataSK()         // → "METADATA"
-orderEventSK(ts, id)     // → "EVENT#{timestamp}#{eventId}"
-userKey("user1")          // → "USER#user1"
-userOrderSK("abc123")    // → "ORDER#abc123"
-idempotencyKey("key1")   // → "IDEMPOTENCY#key1"
-idempotencyLockSK()      // → "LOCK"
+orderKey("abc")           // "ORDER#abc"
+orderMetadataSK()         // "METADATA"
+orderEventSK(ts, id)     // "EVENT#{ts}#{id}"
+userKey("user1")          // "USER#user1"
+userOrderSK("abc")       // "ORDER#abc"
+idempotencyKey("k")      // "IDEMPOTENCY#k"
+idempotencyLockSK()      // "LOCK"
 ```
 
-### Order Repository (`order-repository.ts`)
+### Order repository (`order-repository.ts`)
 
-CRUD operations for orders with idempotency protection:
+- `createOrder(client, order, idempotencyKey)` - transactional write with idempotency protection
+- `getOrder(client, orderId)` - get order metadata
+- `getOrderWithEvents(client, orderId)` - order + events in one query
+- `getUserOrders(client, userId, limit)` - user's orders, sorted desc, max 50
+- `updateOrderStatus(client, orderId, status)` - update status and GSI1
 
-- `createOrder(client, order, idempotencyKey)` — Transactional write (order + user-order + idempotency lock)
-- `getOrder(client, orderId)` — Get order metadata
-- `getOrderWithEvents(client, orderId)` — Order + all events in one query
-- `getUserOrders(client, userId, limit)` — GSI2 query, sorted desc, max 50
-- `updateOrderStatus(client, orderId, status)` — Update with GSI1PK refresh
+### Event repository (`event-repository.ts`)
 
-### Event Repository (`event-repository.ts`)
-
-Store and query order events:
-
-- `storeEvent(orderId, event)` — Write event with timestamp-based sort key
-- `getRecentEvents(limit)` — Scan for recent events, sorted desc, max 100
-- `getOrderEvents(orderId)` — Query all events for an order
-
-## DynamoDB Table Design
-
-Single table: `eventforge-events` (on-demand billing)
-
-| Entity | PK | SK |
-|--------|----|----|
-| Order | ORDER#{orderId} | METADATA |
-| Event | ORDER#{orderId} | EVENT#{timestamp}#{eventId} |
-| User-Order | USER#{userId} | ORDER#{orderId} |
-| Idempotency | IDEMPOTENCY#{key} | LOCK (TTL: 24h) |
-
-**GSI1**: status → createdAt (orders by status)
-**GSI2**: userId → createdAt (user's order history)
+- `storeEvent(orderId, event)` - write event with timestamp sort key
+- `getRecentEvents(limit)` - recent events across all orders, max 100
+- `getOrderEvents(orderId)` - all events for one order
 
 ## Tests
 
@@ -56,4 +51,4 @@ Single table: `eventforge-events` (on-demand billing)
 npm test -- --testPathPattern="packages/shared"
 ```
 
-Property-based tests verify key construction patterns and idempotency round-trips across random inputs.
+Property tests verify key construction patterns and idempotency behavior across random inputs.
