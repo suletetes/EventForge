@@ -1,0 +1,316 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: EventForge EventBridge custom bus and routing rules
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+    Description: Environment name for resource naming
+
+  StepFunctionsArn:
+    Type: String
+    Description: ARN of the Order Workflow Step Functions state machine
+
+  EmailQueueArn:
+    Type: String
+    Description: ARN of the email SQS queue
+
+  PDFQueueArn:
+    Type: String
+    Description: ARN of the PDF SQS queue
+
+  WebhookQueueArn:
+    Type: String
+    Description: ARN of the webhook SQS queue
+
+Resources:
+  # =============================================================
+  # Custom Event Bus
+  # Central event bus for all EventForge events, separate from
+  # the default bus
+  # =============================================================
+  EventForgeBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub '${EnvironmentName}-eventforge-bus'
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: EventForge
+
+  # =============================================================
+  # CloudWatch Logs Log Group for event archival
+  # =============================================================
+  EventArchiveLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/events/${EnvironmentName}-eventforge-bus/archive'
+      RetentionInDays: 30
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: EventForge
+
+  # =============================================================
+  # Rule: order-created-rule
+  # Routes order.created events from the API to Step Functions
+  # Source: eventforge.api, Detail-Type: order.created
+  # =============================================================
+  OrderCreatedRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${EnvironmentName}-order-created-rule'
+      Description: Routes order.created events to the Order Workflow Step Functions state machine
+      EventBusName: !Ref EventForgeBus
+      State: ENABLED
+      EventPattern:
+        source:
+          - eventforge.api
+        detail-type:
+          - order.created
+      Targets:
+        - Id: StepFunctionsTarget
+          Arn: !Ref StepFunctionsArn
+          RoleArn: !GetAtt EventBridgeStepFunctionsRole.Arn
+
+  # =============================================================
+  # Rule: order-completed-email-rule
+  # Routes order.completed events from the workflow to email queue
+  # Source: eventforge.workflow, Detail-Type: order.completed
+  # =============================================================
+  OrderCompletedEmailRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${EnvironmentName}-order-completed-email-rule'
+      Description: Routes order.completed events to the email SQS queue
+      EventBusName: !Ref EventForgeBus
+      State: ENABLED
+      EventPattern:
+        source:
+          - eventforge.workflow
+        detail-type:
+          - order.completed
+      Targets:
+        - Id: EmailQueueTarget
+          Arn: !Ref EmailQueueArn
+
+  # =============================================================
+  # Rule: order-completed-pdf-rule
+  # Routes order.completed events from the workflow to PDF queue
+  # Source: eventforge.workflow, Detail-Type: order.completed
+  # =============================================================
+  OrderCompletedPDFRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${EnvironmentName}-order-completed-pdf-rule'
+      Description: Routes order.completed events to the PDF SQS queue
+      EventBusName: !Ref EventForgeBus
+      State: ENABLED
+      EventPattern:
+        source:
+          - eventforge.workflow
+        detail-type:
+          - order.completed
+      Targets:
+        - Id: PDFQueueTarget
+          Arn: !Ref PDFQueueArn
+
+  # =============================================================
+  # Rule: all-events-webhook-rule
+  # Routes all events with source prefix "eventforge" to webhook queue
+  # =============================================================
+  AllEventsWebhookRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${EnvironmentName}-all-events-webhook-rule'
+      Description: Routes all eventforge events to the webhook SQS queue
+      EventBusName: !Ref EventForgeBus
+      State: ENABLED
+      EventPattern:
+        source:
+          - prefix: eventforge
+      Targets:
+        - Id: WebhookQueueTarget
+          Arn: !Ref WebhookQueueArn
+
+  # =============================================================
+  # Rule: all-events-archive-rule
+  # Routes all events with source prefix "eventforge" to
+  # CloudWatch Logs for archival
+  # =============================================================
+  AllEventsArchiveRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${EnvironmentName}-all-events-archive-rule'
+      Description: Archives all eventforge events to CloudWatch Logs
+      EventBusName: !Ref EventForgeBus
+      State: ENABLED
+      EventPattern:
+        source:
+          - prefix: eventforge
+      Targets:
+        - Id: CloudWatchLogsTarget
+          Arn: !GetAtt EventArchiveLogGroup.Arn
+
+  # =============================================================
+  # IAM Role: EventBridge → Step Functions
+  # Allows EventBridge to start Step Functions executions
+  # =============================================================
+  EventBridgeStepFunctionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-eventforge-eb-sfn-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StartStepFunctionsExecution
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource:
+                  - !Ref StepFunctionsArn
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: EventForge
+
+  # =============================================================
+  # SQS Queue Policies
+  # Allow EventBridge to send messages to the SQS queues
+  # =============================================================
+  EmailQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/${EnvironmentName}-eventforge-email-queue'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !Ref EmailQueueArn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !GetAtt OrderCompletedEmailRule.Arn
+
+  PDFQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/${EnvironmentName}-eventforge-pdf-queue'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !Ref PDFQueueArn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !GetAtt OrderCompletedPDFRule.Arn
+
+  WebhookQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/${EnvironmentName}-eventforge-webhook-queue'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !Ref WebhookQueueArn
+            Condition:
+              ArnEquals:
+                aws:SourceArn:
+                  - !GetAtt AllEventsWebhookRule.Arn
+
+  # =============================================================
+  # Resource Policy: Allow EventBridge to write to CloudWatch Logs
+  # =============================================================
+  EventArchiveLogGroupPolicy:
+    Type: AWS::Logs::ResourcePolicy
+    Properties:
+      PolicyName: !Sub '${EnvironmentName}-eventforge-eventbridge-logs-policy'
+      PolicyDocument: !Sub |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "events.amazonaws.com"
+              },
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+              ],
+              "Resource": "${EventArchiveLogGroup.Arn}:*"
+            }
+          ]
+        }
+
+Outputs:
+  EventBusName:
+    Description: EventBridge custom bus name
+    Value: !Ref EventForgeBus
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgeBusName'
+
+  EventBusArn:
+    Description: EventBridge custom bus ARN
+    Value: !GetAtt EventForgeBus.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgeBusArn'
+
+  OrderCreatedRuleArn:
+    Description: ARN of the order-created EventBridge rule
+    Value: !GetAtt OrderCreatedRule.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-OrderCreatedRuleArn'
+
+  OrderCompletedEmailRuleArn:
+    Description: ARN of the order-completed-email EventBridge rule
+    Value: !GetAtt OrderCompletedEmailRule.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-OrderCompletedEmailRuleArn'
+
+  OrderCompletedPDFRuleArn:
+    Description: ARN of the order-completed-pdf EventBridge rule
+    Value: !GetAtt OrderCompletedPDFRule.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-OrderCompletedPDFRuleArn'
+
+  AllEventsWebhookRuleArn:
+    Description: ARN of the all-events-webhook EventBridge rule
+    Value: !GetAtt AllEventsWebhookRule.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-AllEventsWebhookRuleArn'
+
+  AllEventsArchiveRuleArn:
+    Description: ARN of the all-events-archive EventBridge rule
+    Value: !GetAtt AllEventsArchiveRule.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-AllEventsArchiveRuleArn'
+
+  EventArchiveLogGroupArn:
+    Description: ARN of the CloudWatch Logs log group for event archival
+    Value: !GetAtt EventArchiveLogGroup.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-EventArchiveLogGroupArn'

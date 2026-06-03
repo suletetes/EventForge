@@ -1,0 +1,73 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: EventForge API Gateway HTTP API for external webhook ingestion
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+    Description: Environment name for resource naming
+  WebhookIngestFunctionArn:
+    Type: String
+    Description: ARN of the webhook ingestion Lambda function
+
+Resources:
+  # HTTP API for external webhook ingestion
+  WebhookHttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub '${EnvironmentName}-eventforge-webhook-api'
+      ProtocolType: HTTP
+      Description: EventForge external webhook ingestion endpoint
+      Tags:
+        Environment: !Ref EnvironmentName
+        Project: EventForge
+
+  # Default stage with throttling
+  WebhookApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref WebhookHttpApi
+      StageName: '$default'
+      AutoDeploy: true
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 200
+        ThrottlingRateLimit: 100
+
+  # Lambda integration
+  WebhookIngestIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebhookHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Ref WebhookIngestFunctionArn
+      PayloadFormatVersion: '2.0'
+
+  # POST /webhooks/ingest route
+  WebhookIngestRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebhookHttpApi
+      RouteKey: 'POST /webhooks/ingest'
+      Target: !Sub 'integrations/${WebhookIngestIntegration}'
+
+  # Lambda permission for API Gateway to invoke the function
+  WebhookIngestPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WebhookIngestFunctionArn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebhookHttpApi}/*/*/webhooks/ingest'
+
+Outputs:
+  WebhookApiEndpoint:
+    Description: API Gateway endpoint URL for webhook ingestion
+    Value: !GetAtt WebhookHttpApi.ApiEndpoint
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgeWebhookApiEndpoint'
+  WebhookApiId:
+    Description: API Gateway HTTP API ID
+    Value: !Ref WebhookHttpApi
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgeWebhookApiId'

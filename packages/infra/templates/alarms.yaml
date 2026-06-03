@@ -1,0 +1,105 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: EventForge CloudWatch alarms and SNS topic for dead-letter queue monitoring
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+    Description: Environment name for resource naming
+  EmailDlqName:
+    Type: String
+    Description: Name of the email dead-letter queue to monitor
+  PdfDlqName:
+    Type: String
+    Description: Name of the PDF dead-letter queue to monitor
+  WebhookDlqName:
+    Type: String
+    Description: Name of the webhook dead-letter queue to monitor
+
+Resources:
+  # SNS Topic for operations alerts
+  AlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${EnvironmentName}-eventforge-alerts'
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: EventForge
+        - Key: Purpose
+          Value: operations-alerts
+
+  # CloudWatch Alarm for Email DLQ
+  EmailDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${EnvironmentName}-eventforge-email-dlq-alarm'
+      AlarmDescription: Alarm when messages appear in the email dead-letter queue
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !Ref EmailDlqName
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+      OKActions:
+        - !Ref AlertsTopic
+
+  # CloudWatch Alarm for PDF DLQ
+  PdfDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${EnvironmentName}-eventforge-pdf-dlq-alarm'
+      AlarmDescription: Alarm when messages appear in the PDF dead-letter queue
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !Ref PdfDlqName
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+      OKActions:
+        - !Ref AlertsTopic
+
+  # CloudWatch Alarm for Webhook DLQ
+  WebhookDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${EnvironmentName}-eventforge-webhook-dlq-alarm'
+      AlarmDescription: Alarm when messages appear in the webhook dead-letter queue
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !Ref WebhookDlqName
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+      OKActions:
+        - !Ref AlertsTopic
+
+Outputs:
+  AlertsTopicArn:
+    Description: SNS topic ARN for operations alerts
+    Value: !Ref AlertsTopic
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgeAlertsTopicArn'

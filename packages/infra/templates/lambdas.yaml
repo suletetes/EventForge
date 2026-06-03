@@ -1,0 +1,351 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: EventForge Lambda functions for workflow processing, background processors, and webhook ingestion
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+    Description: Environment name for resource naming
+
+  DynamoDBTableName:
+    Type: String
+    Description: Name of the eventforge-events DynamoDB table
+
+  EventBusName:
+    Type: String
+    Description: Name of the eventforge-bus EventBridge custom bus
+
+  ReceiptsBucketName:
+    Type: String
+    Description: Name of the S3 receipts bucket
+
+  EmailQueueArn:
+    Type: String
+    Description: ARN of the email SQS queue
+
+  PdfQueueArn:
+    Type: String
+    Description: ARN of the PDF SQS queue
+
+  WebhookQueueArn:
+    Type: String
+    Description: ARN of the webhook SQS queue
+
+  WorkflowRoleArn:
+    Type: String
+    Description: ARN of the Lambda workflow execution role
+
+  EmailProcessorRoleArn:
+    Type: String
+    Description: ARN of the Lambda email processor role
+
+  PdfProcessorRoleArn:
+    Type: String
+    Description: ARN of the Lambda PDF processor role
+
+  WebhookProcessorRoleArn:
+    Type: String
+    Description: ARN of the Lambda webhook processor role
+
+  IngestRoleArn:
+    Type: String
+    Description: ARN of the Lambda webhook ingestion role
+
+Resources:
+  # =============================================================
+  # Workflow Functions
+  # Invoked by Step Functions for order processing saga
+  # =============================================================
+
+  ValidateOrderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-eventforge-validate-order'
+      Runtime: nodejs20.x
+      Handler: dist/workflow/validate-order.handler
+      Timeout: 30
+      MemorySize: 128
+      Role: !Ref WorkflowRoleArn
+      Tracing: Active
+      Environment:
+        Variables:
+          DYNAMODB_TABLE: !Ref DynamoDBTableName
+          EVENT_BUS_NAME: !Ref EventBusName
+          RECEIPTS_BUCKET: !Ref ReceiptsBucketName
+      Tags:
+        Environment: !Ref EnvironmentName
+        Project: eventforge
+        Component: workflow
+
+  ReserveInventoryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-eventforge-reserve-inventory'
+      Runtime: nodejs20.x
+      Handler: dist/workflow/reserve-inventory.handler
+      Timeout: 30
+      MemorySize: 128
+      Role: !Ref WorkflowRoleArn
+      Tracing: Active
+      Environment:
+        Variables:
+          DYNAMODB_TABLE: !Ref DynamoDBTableName
+          EVENT_BUS_NAME: !Ref EventBusName
+          RECEIPTS_BUCKET: !Ref ReceiptsBucketName
+      Tags:
+        Environment: !Ref EnvironmentName
+        Project: eventforge
+        Component: workflow
+
+  ChargePaymentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-eventforge-charge-payment'
+      Runtime: nodejs20.x
+      Handler: dist/workflow/charge-payment.handler
+      Timeout: 30
+      MemorySize: 128
+      Role: !Ref WorkflowRoleArn
+      Tracing: Active
+      Environment:
+        Variables:
+          DYNAMODB_TABLE: !Ref DynamoDBTableName
+          EVENT_BUS_NAME: !Ref EventBusName
+          RECEIPTS_BUCKET: !Ref ReceiptsBucketName
+      Tags:
+        Environment: !Ref EnvironmentName
+        Project: eventforge
+        Component: workflow
+
+  ConfirmOrderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-eventforge-confirm-order'
+      Runtime: nodejs20.x
+      Handler: dist/workflow/confirm-order.handler
+      Timeout: 30
+      MemorySize: 128
+      Role: !Ref WorkflowRoleArn
+      Tracing: Active
+      Environment:
+        Variables:
+          DYNAMODB_TABLE: !Ref DynamoDBTableName
+          EVENT_BUS_NAME: !Ref EventBusName
+          RECEIPTS_BUCKET: !Ref ReceiptsBucketName
+      Tags:
+        Environment: !Ref EnvironmentName
+        Project: eventforge
+        Component: workflow
+
+  ReleaseInventoryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-eventforge-release-inventory'
+      Runtime: nodejs20.x
+      Handler: dist/workflow/release-inventory.handler
+      Timeout: 30
+      MemorySize: 128
+      Role: !Ref WorkflowRoleArn
+      Tracing: Active
+      Environment:
+        Variables:
+          DYNAMODB_TABLE: !Ref DynamoDBTableName
+          EVENT_BUS_NAME: !Ref EventBusName
+          RECEIPTS_BUCKET: !Ref ReceiptsBucketName
+      Tags:
+        Environment: !Ref EnvironmentName
+        Project: eventforge
+        Component: workflow
+
+  OrderFailedFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-eventforge-order-failed'
+      Runtime: nodejs20.x
+      Handler: dist/workflow/order-failed.handler
+      Timeout: 30
+      MemorySize: 128
+      Role: !Ref WorkflowRoleArn
+      Tracing: Active
+      Environment:
+        Variables:
+          DYNAMODB_TABLE: !Ref DynamoDBTableName
+          EVENT_BUS_NAME: !Ref EventBusName
+          RECEIPTS_BUCKET: !Ref ReceiptsBucketName
+      Tags:
+        Environment: !Ref EnvironmentName
+        Project: eventforge
+        Component: workflow
+
+  # =============================================================
+  # Processor Functions
+  # Triggered by SQS queues for background event processing
+  # =============================================================
+
+  EmailProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-eventforge-email-processor'
+      Runtime: nodejs20.x
+      Handler: dist/processors/email-processor.handler
+      Timeout: 30
+      MemorySize: 128
+      Role: !Ref EmailProcessorRoleArn
+      Tracing: Active
+      Environment:
+        Variables:
+          DYNAMODB_TABLE: !Ref DynamoDBTableName
+          EVENT_BUS_NAME: !Ref EventBusName
+          RECEIPTS_BUCKET: !Ref ReceiptsBucketName
+      Events:
+        EmailQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !Ref EmailQueueArn
+            BatchSize: 1
+      Tags:
+        Environment: !Ref EnvironmentName
+        Project: eventforge
+        Component: processor
+
+  PdfProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-eventforge-pdf-processor'
+      Runtime: nodejs20.x
+      Handler: dist/processors/pdf-processor.handler
+      Timeout: 60
+      MemorySize: 512
+      Role: !Ref PdfProcessorRoleArn
+      Tracing: Active
+      Environment:
+        Variables:
+          DYNAMODB_TABLE: !Ref DynamoDBTableName
+          EVENT_BUS_NAME: !Ref EventBusName
+          RECEIPTS_BUCKET: !Ref ReceiptsBucketName
+      Events:
+        PdfQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !Ref PdfQueueArn
+            BatchSize: 1
+      Tags:
+        Environment: !Ref EnvironmentName
+        Project: eventforge
+        Component: processor
+
+  WebhookProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-eventforge-webhook-processor'
+      Runtime: nodejs20.x
+      Handler: dist/processors/webhook-processor.handler
+      Timeout: 30
+      MemorySize: 128
+      Role: !Ref WebhookProcessorRoleArn
+      Tracing: Active
+      Environment:
+        Variables:
+          DYNAMODB_TABLE: !Ref DynamoDBTableName
+          EVENT_BUS_NAME: !Ref EventBusName
+          RECEIPTS_BUCKET: !Ref ReceiptsBucketName
+      Events:
+        WebhookQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !Ref WebhookQueueArn
+            BatchSize: 1
+      Tags:
+        Environment: !Ref EnvironmentName
+        Project: eventforge
+        Component: processor
+
+  # =============================================================
+  # Ingestion Function
+  # Invoked by API Gateway for external webhook ingestion
+  # =============================================================
+
+  WebhookIngestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-eventforge-webhook-ingest'
+      Runtime: nodejs20.x
+      Handler: dist/ingestion/webhook-ingest.handler
+      Timeout: 10
+      MemorySize: 128
+      Role: !Ref IngestRoleArn
+      Tracing: Active
+      Environment:
+        Variables:
+          DYNAMODB_TABLE: !Ref DynamoDBTableName
+          EVENT_BUS_NAME: !Ref EventBusName
+          RECEIPTS_BUCKET: !Ref ReceiptsBucketName
+      Tags:
+        Environment: !Ref EnvironmentName
+        Project: eventforge
+        Component: ingestion
+
+Outputs:
+  # Workflow Function ARNs
+  ValidateOrderFunctionArn:
+    Description: ARN of the ValidateOrder Lambda function
+    Value: !GetAtt ValidateOrderFunction.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-ValidateOrderFunctionArn'
+
+  ReserveInventoryFunctionArn:
+    Description: ARN of the ReserveInventory Lambda function
+    Value: !GetAtt ReserveInventoryFunction.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-ReserveInventoryFunctionArn'
+
+  ChargePaymentFunctionArn:
+    Description: ARN of the ChargePayment Lambda function
+    Value: !GetAtt ChargePaymentFunction.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-ChargePaymentFunctionArn'
+
+  ConfirmOrderFunctionArn:
+    Description: ARN of the ConfirmOrder Lambda function
+    Value: !GetAtt ConfirmOrderFunction.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-ConfirmOrderFunctionArn'
+
+  ReleaseInventoryFunctionArn:
+    Description: ARN of the ReleaseInventory Lambda function
+    Value: !GetAtt ReleaseInventoryFunction.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-ReleaseInventoryFunctionArn'
+
+  OrderFailedFunctionArn:
+    Description: ARN of the OrderFailed Lambda function
+    Value: !GetAtt OrderFailedFunction.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-OrderFailedFunctionArn'
+
+  # Processor Function ARNs
+  EmailProcessorFunctionArn:
+    Description: ARN of the EmailProcessor Lambda function
+    Value: !GetAtt EmailProcessorFunction.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-EmailProcessorFunctionArn'
+
+  PdfProcessorFunctionArn:
+    Description: ARN of the PdfProcessor Lambda function
+    Value: !GetAtt PdfProcessorFunction.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-PdfProcessorFunctionArn'
+
+  WebhookProcessorFunctionArn:
+    Description: ARN of the WebhookProcessor Lambda function
+    Value: !GetAtt WebhookProcessorFunction.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-WebhookProcessorFunctionArn'
+
+  # Ingestion Function ARN
+  WebhookIngestFunctionArn:
+    Description: ARN of the WebhookIngest Lambda function
+    Value: !GetAtt WebhookIngestFunction.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-WebhookIngestFunctionArn'

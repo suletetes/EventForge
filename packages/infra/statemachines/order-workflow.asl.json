@@ -1,0 +1,124 @@
+{
+  "Comment": "EventForge Order Processing Workflow - Saga pattern with compensation",
+  "StartAt": "ValidateOrder",
+  "Version": "1.0",
+  "TracingConfiguration": {
+    "enabled": true
+  },
+  "States": {
+    "ValidateOrder": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-eventforge-validate-order",
+      "Parameters": {
+        "orderId.$": "$.orderId",
+        "userId.$": "$.userId",
+        "items.$": "$.items",
+        "total.$": "$.total"
+      },
+      "ResultPath": "$.validateResult",
+      "OutputPath": "$",
+      "Next": "ReserveInventory",
+      "Catch": [
+        {
+          "ErrorEquals": ["ValidationError"],
+          "ResultPath": "$.error",
+          "Next": "OrderFailed"
+        }
+      ]
+    },
+    "ReserveInventory": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-eventforge-reserve-inventory",
+      "Parameters": {
+        "orderId.$": "$.orderId",
+        "userId.$": "$.userId",
+        "items.$": "$.items",
+        "total.$": "$.total"
+      },
+      "ResultPath": "$.reserveResult",
+      "OutputPath": "$",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Next": "ChargePayment",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "OrderFailed"
+        }
+      ]
+    },
+    "ChargePayment": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-eventforge-charge-payment",
+      "Parameters": {
+        "orderId.$": "$.orderId",
+        "userId.$": "$.userId",
+        "items.$": "$.items",
+        "total.$": "$.total"
+      },
+      "ResultPath": "$.chargeResult",
+      "OutputPath": "$",
+      "Next": "ConfirmOrder",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "ReleaseInventory"
+        }
+      ]
+    },
+    "ConfirmOrder": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-eventforge-confirm-order",
+      "Parameters": {
+        "orderId.$": "$.orderId",
+        "userId.$": "$.userId",
+        "items.$": "$.items",
+        "total.$": "$.total"
+      },
+      "ResultPath": "$.confirmResult",
+      "OutputPath": "$",
+      "End": true,
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "ReleaseInventory"
+        }
+      ]
+    },
+    "ReleaseInventory": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-eventforge-release-inventory",
+      "Parameters": {
+        "orderId.$": "$.orderId",
+        "userId.$": "$.userId",
+        "items.$": "$.items",
+        "total.$": "$.total"
+      },
+      "ResultPath": "$.releaseResult",
+      "OutputPath": "$",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Next": "OrderFailed"
+    },
+    "OrderFailed": {
+      "Type": "Fail",
+      "Error": "OrderProcessingFailed",
+      "Cause": "Order processing failed during workflow execution"
+    }
+  }
+}

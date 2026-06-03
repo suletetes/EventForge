@@ -1,0 +1,172 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: EventForge SQS queues and dead-letter queues for background processing
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+    Description: Environment name for resource naming
+
+Resources:
+  # Dead-Letter Queues (defined first as they are referenced by source queues)
+  EmailDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${EnvironmentName}-eventforge-email-dlq'
+      MessageRetentionPeriod: 1209600  # 14 days in seconds
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: EventForge
+        - Key: Purpose
+          Value: dead-letter-queue
+
+  PdfDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${EnvironmentName}-eventforge-pdf-dlq'
+      MessageRetentionPeriod: 1209600  # 14 days in seconds
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: EventForge
+        - Key: Purpose
+          Value: dead-letter-queue
+
+  WebhookDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${EnvironmentName}-eventforge-webhook-dlq'
+      MessageRetentionPeriod: 1209600  # 14 days in seconds
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: EventForge
+        - Key: Purpose
+          Value: dead-letter-queue
+
+  # Source Queues with redrive policies
+  EmailQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${EnvironmentName}-eventforge-email-queue'
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt EmailDeadLetterQueue.Arn
+        maxReceiveCount: 3
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: EventForge
+        - Key: Purpose
+          Value: email-processing
+
+  PdfQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${EnvironmentName}-eventforge-pdf-queue'
+      VisibilityTimeout: 120
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt PdfDeadLetterQueue.Arn
+        maxReceiveCount: 3
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: EventForge
+        - Key: Purpose
+          Value: pdf-processing
+
+  WebhookQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${EnvironmentName}-eventforge-webhook-queue'
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt WebhookDeadLetterQueue.Arn
+        maxReceiveCount: 5
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: EventForge
+        - Key: Purpose
+          Value: webhook-processing
+
+Outputs:
+  # Email Queue
+  EmailQueueArn:
+    Description: Email processing queue ARN
+    Value: !GetAtt EmailQueue.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgeEmailQueueArn'
+  EmailQueueUrl:
+    Description: Email processing queue URL
+    Value: !Ref EmailQueue
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgeEmailQueueUrl'
+
+  # PDF Queue
+  PdfQueueArn:
+    Description: PDF processing queue ARN
+    Value: !GetAtt PdfQueue.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgePdfQueueArn'
+  PdfQueueUrl:
+    Description: PDF processing queue URL
+    Value: !Ref PdfQueue
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgePdfQueueUrl'
+
+  # Webhook Queue
+  WebhookQueueArn:
+    Description: Webhook processing queue ARN
+    Value: !GetAtt WebhookQueue.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgeWebhookQueueArn'
+  WebhookQueueUrl:
+    Description: Webhook processing queue URL
+    Value: !Ref WebhookQueue
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgeWebhookQueueUrl'
+
+  # Email DLQ
+  EmailDlqArn:
+    Description: Email dead-letter queue ARN
+    Value: !GetAtt EmailDeadLetterQueue.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgeEmailDlqArn'
+  EmailDlqUrl:
+    Description: Email dead-letter queue URL
+    Value: !Ref EmailDeadLetterQueue
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgeEmailDlqUrl'
+
+  # PDF DLQ
+  PdfDlqArn:
+    Description: PDF dead-letter queue ARN
+    Value: !GetAtt PdfDeadLetterQueue.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgePdfDlqArn'
+  PdfDlqUrl:
+    Description: PDF dead-letter queue URL
+    Value: !Ref PdfDeadLetterQueue
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgePdfDlqUrl'
+
+  # Webhook DLQ
+  WebhookDlqArn:
+    Description: Webhook dead-letter queue ARN
+    Value: !GetAtt WebhookDeadLetterQueue.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgeWebhookDlqArn'
+  WebhookDlqUrl:
+    Description: Webhook dead-letter queue URL
+    Value: !Ref WebhookDeadLetterQueue
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgeWebhookDlqUrl'

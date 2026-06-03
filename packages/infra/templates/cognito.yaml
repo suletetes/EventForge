@@ -1,0 +1,72 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: EventForge Cognito User Pool for JWT-based authentication
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+    Description: Environment name for resource naming
+
+Resources:
+  EventForgeUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub '${EnvironmentName}-eventforge-user-pool'
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+      UserPoolTags:
+        Environment: !Ref EnvironmentName
+        Project: EventForge
+
+  EventForgeUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub '${EnvironmentName}-eventforge-client'
+      UserPoolId: !Ref EventForgeUserPool
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      AccessTokenValidity: 1
+      IdTokenValidity: 1
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+      GenerateSecret: false
+      PreventUserExistenceErrors: ENABLED
+
+Outputs:
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref EventForgeUserPool
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgeUserPoolId'
+  UserPoolArn:
+    Description: Cognito User Pool ARN
+    Value: !GetAtt EventForgeUserPool.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgeUserPoolArn'
+  UserPoolClientId:
+    Description: Cognito User Pool Client ID
+    Value: !Ref EventForgeUserPoolClient
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgeUserPoolClientId'

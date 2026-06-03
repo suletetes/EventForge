@@ -1,0 +1,310 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: EventForge - ECS Fargate Service with ALB and Auto-Scaling
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: The environment name for resource tagging and naming
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID where the ECS service will be deployed
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public subnet 1 for the ALB
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public subnet 2 for the ALB
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet::Id
+    Description: Private subnet 1 for ECS tasks
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: Private subnet 2 for ECS tasks
+
+  ECSTaskRoleArn:
+    Type: String
+    Description: ARN of the IAM role for ECS task (application permissions)
+
+  ECSTaskExecutionRoleArn:
+    Type: String
+    Description: ARN of the IAM role for ECS task execution (ECR pull, CloudWatch Logs)
+
+  ContainerImage:
+    Type: String
+    Description: Docker image URI for the API service container
+
+  EcsMinTasks:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    Description: Minimum number of ECS tasks for auto-scaling
+
+  EcsMaxTasks:
+    Type: Number
+    Default: 4
+    MinValue: 1
+    Description: Maximum number of ECS tasks for auto-scaling
+
+Resources:
+  # ECS Cluster
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${EnvironmentName}-eventforge-cluster'
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-eventforge-cluster'
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # CloudWatch Log Group for ECS Tasks
+  ECSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${EnvironmentName}-eventforge-api'
+      RetentionInDays: 30
+
+  # ECS Task Definition
+  ECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${EnvironmentName}-eventforge-api'
+      Cpu: '256'
+      Memory: '512'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !Ref ECSTaskExecutionRoleArn
+      TaskRoleArn: !Ref ECSTaskRoleArn
+      ContainerDefinitions:
+        - Name: eventforge-api
+          Image: !Ref ContainerImage
+          Essential: true
+          PortMappings:
+            - ContainerPort: 3000
+              Protocol: tcp
+          Environment:
+            - Name: NODE_ENV
+              Value: production
+            - Name: PORT
+              Value: '3000'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ECSLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - 'curl -f http://localhost:3000/health || exit 1'
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-eventforge-api-task'
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ALB Security Group - allows inbound 80 and 443 from anywhere
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for EventForge ALB - allows inbound HTTP/HTTPS
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: '0.0.0.0/0'
+          Description: Allow HTTP from anywhere
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: '0.0.0.0/0'
+          Description: Allow HTTPS from anywhere
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-eventforge-alb-sg'
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ECS Security Group - allows inbound 3000 from ALB SG only
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for EventForge ECS tasks - allows inbound from ALB only
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+          Description: Allow traffic from ALB on port 3000
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-eventforge-ecs-sg'
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # Application Load Balancer
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub '${EnvironmentName}-eventforge-alb'
+      Type: application
+      Scheme: internet-facing
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-eventforge-alb'
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ALB Target Group with health check
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${EnvironmentName}-eventforge-tg'
+      Port: 3000
+      Protocol: HTTP
+      VpcId: !Ref VpcId
+      TargetType: ip
+      HealthCheckEnabled: true
+      HealthCheckPath: /health
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: '200'
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-eventforge-tg'
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ALB Listener - HTTP on port 80
+  ALBListenerHTTP:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroup
+
+  # ECS Service
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn: ALBListenerHTTP
+    Properties:
+      ServiceName: !Sub '${EnvironmentName}-eventforge-api-service'
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref ECSTaskDefinition
+      DesiredCount: 2
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - !Ref PrivateSubnet1
+            - !Ref PrivateSubnet2
+          SecurityGroups:
+            - !Ref ECSSecurityGroup
+      LoadBalancers:
+        - ContainerName: eventforge-api
+          ContainerPort: 3000
+          TargetGroupArn: !Ref ALBTargetGroup
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 50
+        MaximumPercent: 200
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-eventforge-api-service'
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # Auto-Scaling Target
+  ECSScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: !Ref EcsMaxTasks
+      MinCapacity: !Ref EcsMinTasks
+      ResourceId: !Sub 'service/${ECSCluster}/${ECSService.Name}'
+      RoleARN: !Sub 'arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService'
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  # Auto-Scaling Policy - Target Tracking on CPU 70%
+  ECSScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub '${EnvironmentName}-eventforge-cpu-scaling'
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ECSScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        TargetValue: 70.0
+        ScaleOutCooldown: 120
+        ScaleInCooldown: 300
+
+Outputs:
+  ALBDnsName:
+    Description: DNS name of the Application Load Balancer
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForge-ALBDnsName'
+
+  ECSServiceArn:
+    Description: ARN of the ECS service
+    Value: !Ref ECSService
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForge-ECSServiceArn'
+
+  ALBSecurityGroupId:
+    Description: Security Group ID of the ALB
+    Value: !Ref ALBSecurityGroup
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForge-ALBSecurityGroupId'
+
+  ECSClusterArn:
+    Description: ARN of the ECS cluster
+    Value: !GetAtt ECSCluster.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForge-ECSClusterArn'
+
+  ECSSecurityGroupId:
+    Description: Security Group ID of the ECS tasks
+    Value: !Ref ECSSecurityGroup
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForge-ECSSecurityGroupId'
+
+  ALBTargetGroupArn:
+    Description: ARN of the ALB Target Group
+    Value: !Ref ALBTargetGroup
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForge-ALBTargetGroupArn'

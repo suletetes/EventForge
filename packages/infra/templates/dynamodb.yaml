@@ -1,0 +1,81 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: EventForge DynamoDB table with single-table design
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+    Description: Environment name for resource naming
+
+Resources:
+  EventForgeTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${EnvironmentName}-eventforge-events'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+        - AttributeName: GSI2PK
+          AttributeType: S
+        - AttributeName: GSI2SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GSI2
+          KeySchema:
+            - AttributeName: GSI2PK
+              KeyType: HASH
+            - AttributeName: GSI2SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: EventForge
+
+Outputs:
+  TableName:
+    Description: DynamoDB table name
+    Value: !Ref EventForgeTable
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgeTableName'
+  TableArn:
+    Description: DynamoDB table ARN
+    Value: !GetAtt EventForgeTable.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgeTableArn'
+  GSI1Arn:
+    Description: GSI1 ARN for status-based queries
+    Value: !Sub '${EventForgeTable.Arn}/index/GSI1'
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgeGSI1Arn'
+  GSI2Arn:
+    Description: GSI2 ARN for user-based queries
+    Value: !Sub '${EventForgeTable.Arn}/index/GSI2'
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgeGSI2Arn'
