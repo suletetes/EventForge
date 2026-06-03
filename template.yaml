@@ -1,0 +1,459 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  EventForge Platform - Root SAM template orchestrating all nested stacks.
+  Deploys a hybrid event processing platform with ECS Fargate API, Lambda processors,
+  Step Functions workflow, EventBridge routing, and full observability.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Environment name used for resource naming and tagging
+
+  VpcCidr:
+    Type: String
+    Default: '10.0.0.0/16'
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
+    Description: CIDR block for the VPC
+
+  EcsMinTasks:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    Description: Minimum number of ECS tasks for auto-scaling
+
+  EcsMaxTasks:
+    Type: Number
+    Default: 4
+    MinValue: 1
+    Description: Maximum number of ECS tasks for auto-scaling
+
+  DomainName:
+    Type: String
+    Default: ''
+    Description: Domain name for the platform (optional)
+
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues:
+      - 1
+      - 3
+      - 5
+      - 7
+      - 14
+      - 30
+      - 60
+      - 90
+      - 120
+      - 150
+      - 180
+      - 365
+    Description: Number of days to retain logs in CloudWatch
+
+  ContainerImage:
+    Type: String
+    Default: 'public.ecr.aws/docker/library/node:20-alpine'
+    Description: Docker image URI for the API service container
+
+Resources:
+  # =============================================================
+  # Layer 1: VPC and Networking (no dependencies)
+  # =============================================================
+  VPCStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: packages/infra/templates/vpc.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcCidr: !Ref VpcCidr
+        DomainName: !Ref DomainName
+        LogRetentionDays: !Ref LogRetentionDays
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: StackLayer
+          Value: networking
+
+  # =============================================================
+  # Layer 2: DynamoDB (no dependencies)
+  # =============================================================
+  DynamoDBStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: packages/infra/templates/dynamodb.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: StackLayer
+          Value: data
+
+  # =============================================================
+  # Layer 2: SQS Queues and DLQs (no dependencies)
+  # =============================================================
+  SQSStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: packages/infra/templates/sqs.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: StackLayer
+          Value: messaging
+
+  # =============================================================
+  # Layer 2: Cognito User Pool (no dependencies)
+  # =============================================================
+  CognitoStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: packages/infra/templates/cognito.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: StackLayer
+          Value: auth
+
+  # =============================================================
+  # Layer 2: S3 Receipts Bucket (no dependencies)
+  # Defined here as it is needed by IAM roles and PDF processor
+  # =============================================================
+  ReceiptsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${EnvironmentName}-eventforge-receipts'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: EventForge
+
+  # =============================================================
+  # Layer 3: Step Functions State Machine
+  # Depends on: IAM (but we create the role inline to break
+  # circular dependency with EventBridge)
+  # =============================================================
+  OrderWorkflowStateMachine:
+    Type: AWS::Serverless::StateMachine
+    DependsOn:
+      - DynamoDBStack
+    Properties:
+      Name: !Sub '${EnvironmentName}-eventforge-order-workflow'
+      DefinitionUri: packages/infra/statemachines/order-workflow.asl.json
+      DefinitionSubstitutions:
+        ValidateOrderFunctionArn: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-eventforge-validate-order'
+        ReserveInventoryFunctionArn: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-eventforge-reserve-inventory'
+        ChargePaymentFunctionArn: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-eventforge-charge-payment'
+        ConfirmOrderFunctionArn: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-eventforge-confirm-order'
+        ReleaseInventoryFunctionArn: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-eventforge-release-inventory'
+        OrderFailedFunctionArn: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-eventforge-order-failed'
+      Tracing:
+        Enabled: true
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Sub '${EnvironmentName}-eventforge-validate-order'
+        - LambdaInvokePolicy:
+            FunctionName: !Sub '${EnvironmentName}-eventforge-reserve-inventory'
+        - LambdaInvokePolicy:
+            FunctionName: !Sub '${EnvironmentName}-eventforge-charge-payment'
+        - LambdaInvokePolicy:
+            FunctionName: !Sub '${EnvironmentName}-eventforge-confirm-order'
+        - LambdaInvokePolicy:
+            FunctionName: !Sub '${EnvironmentName}-eventforge-release-inventory'
+        - LambdaInvokePolicy:
+            FunctionName: !Sub '${EnvironmentName}-eventforge-order-failed'
+        - EventBridgePutEventsPolicy:
+            EventBusName: !Sub '${EnvironmentName}-eventforge-bus'
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - xray:PutTraceSegments
+                - xray:PutTelemetryRecords
+                - xray:GetSamplingRules
+                - xray:GetSamplingTargets
+              Resource: '*'
+      Tags:
+        Environment: !Ref EnvironmentName
+        Project: EventForge
+
+  # =============================================================
+  # Layer 3: IAM Roles (depends on DynamoDB, SQS, S3)
+  # EventBridge bus ARN is constructed deterministically to avoid
+  # circular dependency with EventBridge stack
+  # =============================================================
+  IAMStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - DynamoDBStack
+      - SQSStack
+    Properties:
+      TemplateURL: packages/infra/templates/iam.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        DynamoDBTableArn: !GetAtt DynamoDBStack.Outputs.TableArn
+        EventBridgeBusArn: !Sub 'arn:aws:events:${AWS::Region}:${AWS::AccountId}:event-bus/${EnvironmentName}-eventforge-bus'
+        ReceiptsBucketArn: !GetAtt ReceiptsBucket.Arn
+        EmailQueueArn: !GetAtt SQSStack.Outputs.EmailQueueArn
+        PDFQueueArn: !GetAtt SQSStack.Outputs.PdfQueueArn
+        WebhookQueueArn: !GetAtt SQSStack.Outputs.WebhookQueueArn
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: StackLayer
+          Value: security
+
+  # =============================================================
+  # Layer 4: ECS Fargate Service (depends on VPC, IAM)
+  # =============================================================
+  ECSStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - VPCStack
+      - IAMStack
+    Properties:
+      TemplateURL: packages/infra/templates/ecs.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !GetAtt VPCStack.Outputs.VpcId
+        PublicSubnet1: !GetAtt VPCStack.Outputs.PublicSubnet1Id
+        PublicSubnet2: !GetAtt VPCStack.Outputs.PublicSubnet2Id
+        PrivateSubnet1: !GetAtt VPCStack.Outputs.PrivateSubnet1Id
+        PrivateSubnet2: !GetAtt VPCStack.Outputs.PrivateSubnet2Id
+        ECSTaskRoleArn: !GetAtt IAMStack.Outputs.ECSTaskRoleArn
+        ECSTaskExecutionRoleArn: !GetAtt IAMStack.Outputs.ECSTaskExecutionRoleArn
+        ContainerImage: !Ref ContainerImage
+        EcsMinTasks: !Ref EcsMinTasks
+        EcsMaxTasks: !Ref EcsMaxTasks
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: StackLayer
+          Value: compute
+
+  # =============================================================
+  # Layer 3: EventBridge Bus and Rules
+  # (depends on SQS, Step Functions)
+  # =============================================================
+  EventBridgeStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - SQSStack
+      - OrderWorkflowStateMachine
+    Properties:
+      TemplateURL: packages/infra/templates/eventbridge.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        StepFunctionsArn: !Ref OrderWorkflowStateMachine
+        EmailQueueArn: !GetAtt SQSStack.Outputs.EmailQueueArn
+        PDFQueueArn: !GetAtt SQSStack.Outputs.PdfQueueArn
+        WebhookQueueArn: !GetAtt SQSStack.Outputs.WebhookQueueArn
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: StackLayer
+          Value: eventing
+
+  # =============================================================
+  # Layer 5: Webhook Ingestion Lambda
+  # Defined here for API Gateway integration
+  # =============================================================
+  WebhookIngestFunction:
+    Type: AWS::Serverless::Function
+    DependsOn:
+      - EventBridgeStack
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-eventforge-webhook-ingest'
+      Runtime: nodejs20.x
+      Handler: index.handler
+      CodeUri: packages/lambdas/dist/ingestion/
+      MemorySize: 128
+      Timeout: 30
+      Tracing: Active
+      Environment:
+        Variables:
+          EVENT_BUS_NAME: !GetAtt EventBridgeStack.Outputs.EventBusName
+          ENVIRONMENT: !Ref EnvironmentName
+      Policies:
+        - EventBridgePutEventsPolicy:
+            EventBusName: !GetAtt EventBridgeStack.Outputs.EventBusName
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - xray:PutTraceSegments
+                - xray:PutTelemetryRecords
+                - xray:GetSamplingRules
+                - xray:GetSamplingTargets
+              Resource: '*'
+      Tags:
+        Environment: !Ref EnvironmentName
+        Project: EventForge
+
+  # =============================================================
+  # Layer 6: API Gateway HTTP API (depends on Lambda)
+  # =============================================================
+  APIGatewayStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - WebhookIngestFunction
+    Properties:
+      TemplateURL: packages/infra/templates/apigateway.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        WebhookIngestFunctionArn: !GetAtt WebhookIngestFunction.Arn
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: StackLayer
+          Value: api
+
+  # =============================================================
+  # Layer 6: CloudFront + S3 Dashboard Hosting (no dependencies)
+  # =============================================================
+  CloudFrontStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: packages/infra/templates/cloudfront.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: StackLayer
+          Value: cdn
+
+  # =============================================================
+  # Layer 7: CloudWatch Alarms (depends on SQS DLQ names)
+  # =============================================================
+  AlarmsStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - SQSStack
+    Properties:
+      TemplateURL: packages/infra/templates/alarms.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        EmailDlqName: !Sub '${EnvironmentName}-eventforge-email-dlq'
+        PdfDlqName: !Sub '${EnvironmentName}-eventforge-pdf-dlq'
+        WebhookDlqName: !Sub '${EnvironmentName}-eventforge-webhook-dlq'
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: StackLayer
+          Value: observability
+
+Outputs:
+  # Networking
+  VpcId:
+    Description: VPC ID
+    Value: !GetAtt VPCStack.Outputs.VpcId
+
+  PublicSubnets:
+    Description: Public subnet IDs (comma-separated)
+    Value: !GetAtt VPCStack.Outputs.PublicSubnets
+
+  PrivateSubnets:
+    Description: Private subnet IDs (comma-separated)
+    Value: !GetAtt VPCStack.Outputs.PrivateSubnets
+
+  # Data
+  DynamoDBTableName:
+    Description: DynamoDB table name
+    Value: !GetAtt DynamoDBStack.Outputs.TableName
+
+  DynamoDBTableArn:
+    Description: DynamoDB table ARN
+    Value: !GetAtt DynamoDBStack.Outputs.TableArn
+
+  ReceiptsBucketName:
+    Description: S3 bucket for PDF receipts
+    Value: !Ref ReceiptsBucket
+
+  ReceiptsBucketArn:
+    Description: S3 receipts bucket ARN
+    Value: !GetAtt ReceiptsBucket.Arn
+
+  # Auth
+  CognitoUserPoolId:
+    Description: Cognito User Pool ID
+    Value: !GetAtt CognitoStack.Outputs.UserPoolId
+
+  CognitoUserPoolClientId:
+    Description: Cognito User Pool Client ID
+    Value: !GetAtt CognitoStack.Outputs.UserPoolClientId
+
+  # Compute
+  ALBDnsName:
+    Description: Application Load Balancer DNS name
+    Value: !GetAtt ECSStack.Outputs.ALBDnsName
+
+  ECSClusterArn:
+    Description: ECS Cluster ARN
+    Value: !GetAtt ECSStack.Outputs.ECSClusterArn
+
+  # Eventing
+  EventBusName:
+    Description: EventBridge custom bus name
+    Value: !GetAtt EventBridgeStack.Outputs.EventBusName
+
+  EventBusArn:
+    Description: EventBridge custom bus ARN
+    Value: !GetAtt EventBridgeStack.Outputs.EventBusArn
+
+  # Messaging
+  EmailQueueUrl:
+    Description: Email processing queue URL
+    Value: !GetAtt SQSStack.Outputs.EmailQueueUrl
+
+  PdfQueueUrl:
+    Description: PDF processing queue URL
+    Value: !GetAtt SQSStack.Outputs.PdfQueueUrl
+
+  WebhookQueueUrl:
+    Description: Webhook processing queue URL
+    Value: !GetAtt SQSStack.Outputs.WebhookQueueUrl
+
+  # Workflow
+  OrderWorkflowArn:
+    Description: Step Functions state machine ARN
+    Value: !Ref OrderWorkflowStateMachine
+
+  # API
+  WebhookApiEndpoint:
+    Description: API Gateway webhook ingestion endpoint
+    Value: !GetAtt APIGatewayStack.Outputs.WebhookApiEndpoint
+
+  # CDN
+  CloudFrontDomain:
+    Description: CloudFront distribution domain for the Dashboard
+    Value: !GetAtt CloudFrontStack.Outputs.CloudFrontDistributionDomainName
+
+  DashboardBucketName:
+    Description: S3 bucket for Dashboard static files
+    Value: !GetAtt CloudFrontStack.Outputs.DashboardBucketName
+
+  # Observability
+  AlertsTopicArn:
+    Description: SNS topic ARN for operations alerts
+    Value: !GetAtt AlarmsStack.Outputs.AlertsTopicArn
