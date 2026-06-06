@@ -2,9 +2,6 @@
   "Comment": "EventForge Order Processing Workflow - Saga pattern with compensation",
   "StartAt": "ValidateOrder",
   "Version": "1.0",
-  "TracingConfiguration": {
-    "enabled": true
-  },
   "States": {
     "ValidateOrder": {
       "Type": "Task",

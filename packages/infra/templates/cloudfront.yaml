@@ -12,7 +12,7 @@ Resources:
   DashboardBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub '${EnvironmentName}-eventforge-dashboard'
+      BucketName: !Sub '${EnvironmentName}-eventforge-dashboard-${AWS::AccountId}'
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
