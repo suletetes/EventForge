@@ -132,7 +132,7 @@ Resources:
   ReceiptsBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub '${EnvironmentName}-eventforge-receipts'
+      BucketName: !Sub '${EnvironmentName}-eventforge-receipts-${AWS::AccountId}'
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -311,6 +311,36 @@ Resources:
         Project: EventForge
 
   # =============================================================
+  # Layer 5: Lambda Processor Functions (depends on IAM, SQS)
+  # =============================================================
+  LambdasStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - IAMStack
+      - SQSStack
+      - DynamoDBStack
+    Properties:
+      TemplateURL: packages/infra/templates/lambdas.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        DynamoDBTableName: !GetAtt DynamoDBStack.Outputs.TableName
+        EventBusName: !Sub '${EnvironmentName}-eventforge-bus'
+        ReceiptsBucketName: !Sub '${EnvironmentName}-eventforge-receipts-${AWS::AccountId}'
+        EmailQueueArn: !GetAtt SQSStack.Outputs.EmailQueueArn
+        PdfQueueArn: !GetAtt SQSStack.Outputs.PdfQueueArn
+        WebhookQueueArn: !GetAtt SQSStack.Outputs.WebhookQueueArn
+        WorkflowRoleArn: !GetAtt IAMStack.Outputs.LambdaWorkflowExecutionRoleArn
+        EmailProcessorRoleArn: !GetAtt IAMStack.Outputs.LambdaEmailProcessorRoleArn
+        PdfProcessorRoleArn: !GetAtt IAMStack.Outputs.LambdaPDFProcessorRoleArn
+        WebhookProcessorRoleArn: !GetAtt IAMStack.Outputs.LambdaWebhookProcessorRoleArn
+        IngestRoleArn: !GetAtt IAMStack.Outputs.LambdaWebhookIngestRoleArn
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: StackLayer
+          Value: compute
+
+  # =============================================================
   # Layer 6: API Gateway HTTP API (depends on Lambda)
   # =============================================================
   APIGatewayStack:
@@ -329,7 +359,7 @@ Resources:
           Value: api
 
   # =============================================================
-  # Layer 6: CloudFront + S3 Dashboard Hosting (no dependencies)
+  # Layer 6: CloudFront + S3 Dashboard Hosting
   # =============================================================
   CloudFrontStack:
     Type: AWS::CloudFormation::Stack
