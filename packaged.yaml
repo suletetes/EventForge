@@ -1,0 +1,604 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'EventForge Platform - Root SAM template orchestrating all nested stacks.
+  Deploys a hybrid event processing platform with ECS Fargate API, Lambda processors,
+  Step Functions workflow, EventBridge routing, and full observability.
+
+  '
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+    AllowedValues:
+    - dev
+    - staging
+    - prod
+    Description: Environment name used for resource naming and tagging
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+    Description: CIDR block for the VPC
+  EcsMinTasks:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    Description: Minimum number of ECS tasks for auto-scaling
+  EcsMaxTasks:
+    Type: Number
+    Default: 4
+    MinValue: 1
+    Description: Maximum number of ECS tasks for auto-scaling
+  DomainName:
+    Type: String
+    Default: ''
+    Description: Domain name for the platform (optional)
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues:
+    - 1
+    - 3
+    - 5
+    - 7
+    - 14
+    - 30
+    - 60
+    - 90
+    - 120
+    - 150
+    - 180
+    - 365
+    Description: Number of days to retain logs in CloudWatch
+  ContainerImage:
+    Type: String
+    Default: public.ecr.aws/docker/library/node:20-alpine
+    Description: Docker image URI for the API service container
+Resources:
+  VPCStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.us-east-1.amazonaws.com/aws-sam-cli-managed-default-samclisourcebucket-mxumdgpwbdki/eventforge-dev/0cd5b997e446c9509710828c5c0fc7f3.template
+      Parameters:
+        EnvironmentName:
+          Ref: EnvironmentName
+        VpcCidr:
+          Ref: VpcCidr
+        DomainName:
+          Ref: DomainName
+        LogRetentionDays:
+          Ref: LogRetentionDays
+      Tags:
+      - Key: Environment
+        Value:
+          Ref: EnvironmentName
+      - Key: StackLayer
+        Value: networking
+    Metadata:
+      SamResourceId: VPCStack
+  DynamoDBStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.us-east-1.amazonaws.com/aws-sam-cli-managed-default-samclisourcebucket-mxumdgpwbdki/eventforge-dev/fa42a257c2c80890b221c4e5e78073d0.template
+      Parameters:
+        EnvironmentName:
+          Ref: EnvironmentName
+      Tags:
+      - Key: Environment
+        Value:
+          Ref: EnvironmentName
+      - Key: StackLayer
+        Value: data
+    Metadata:
+      SamResourceId: DynamoDBStack
+  SQSStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.us-east-1.amazonaws.com/aws-sam-cli-managed-default-samclisourcebucket-mxumdgpwbdki/eventforge-dev/042d1889f9e8f8dd2cb7edd71678edd8.template
+      Parameters:
+        EnvironmentName:
+          Ref: EnvironmentName
+      Tags:
+      - Key: Environment
+        Value:
+          Ref: EnvironmentName
+      - Key: StackLayer
+        Value: messaging
+    Metadata:
+      SamResourceId: SQSStack
+  CognitoStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.us-east-1.amazonaws.com/aws-sam-cli-managed-default-samclisourcebucket-mxumdgpwbdki/eventforge-dev/22cc37927636509670be8c8a3bebf57e.template
+      Parameters:
+        EnvironmentName:
+          Ref: EnvironmentName
+      Tags:
+      - Key: Environment
+        Value:
+          Ref: EnvironmentName
+      - Key: StackLayer
+        Value: auth
+    Metadata:
+      SamResourceId: CognitoStack
+  ReceiptsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${EnvironmentName}-eventforge-receipts-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
+      Tags:
+      - Key: Environment
+        Value:
+          Ref: EnvironmentName
+      - Key: Project
+        Value: EventForge
+    Metadata:
+      SamResourceId: ReceiptsBucket
+  OrderWorkflowStateMachine:
+    Type: AWS::Serverless::StateMachine
+    DependsOn:
+    - DynamoDBStack
+    Properties:
+      Name:
+        Fn::Sub: ${EnvironmentName}-eventforge-order-workflow
+      DefinitionUri:
+        Bucket: aws-sam-cli-managed-default-samclisourcebucket-mxumdgpwbdki
+        Key: eventforge-dev/901a191f504f4df44f9d468a69e86465
+      DefinitionSubstitutions:
+        ValidateOrderFunctionArn:
+          Fn::Sub: arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-eventforge-validate-order
+        ReserveInventoryFunctionArn:
+          Fn::Sub: arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-eventforge-reserve-inventory
+        ChargePaymentFunctionArn:
+          Fn::Sub: arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-eventforge-charge-payment
+        ConfirmOrderFunctionArn:
+          Fn::Sub: arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-eventforge-confirm-order
+        ReleaseInventoryFunctionArn:
+          Fn::Sub: arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-eventforge-release-inventory
+        OrderFailedFunctionArn:
+          Fn::Sub: arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-eventforge-order-failed
+      Tracing:
+        Enabled: true
+      Policies:
+      - LambdaInvokePolicy:
+          FunctionName:
+            Fn::Sub: ${EnvironmentName}-eventforge-validate-order
+      - LambdaInvokePolicy:
+          FunctionName:
+            Fn::Sub: ${EnvironmentName}-eventforge-reserve-inventory
+      - LambdaInvokePolicy:
+          FunctionName:
+            Fn::Sub: ${EnvironmentName}-eventforge-charge-payment
+      - LambdaInvokePolicy:
+          FunctionName:
+            Fn::Sub: ${EnvironmentName}-eventforge-confirm-order
+      - LambdaInvokePolicy:
+          FunctionName:
+            Fn::Sub: ${EnvironmentName}-eventforge-release-inventory
+      - LambdaInvokePolicy:
+          FunctionName:
+            Fn::Sub: ${EnvironmentName}-eventforge-order-failed
+      - EventBridgePutEventsPolicy:
+          EventBusName:
+            Fn::Sub: ${EnvironmentName}-eventforge-bus
+      - Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - xray:PutTraceSegments
+          - xray:PutTelemetryRecords
+          - xray:GetSamplingRules
+          - xray:GetSamplingTargets
+          Resource: '*'
+      Tags:
+        Environment:
+          Ref: EnvironmentName
+        Project: EventForge
+    Metadata:
+      SamResourceId: OrderWorkflowStateMachine
+  IAMStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+    - DynamoDBStack
+    - SQSStack
+    Properties:
+      TemplateURL: https://s3.us-east-1.amazonaws.com/aws-sam-cli-managed-default-samclisourcebucket-mxumdgpwbdki/eventforge-dev/17dcad74a441bed0a33e7d3436065e94.template
+      Parameters:
+        EnvironmentName:
+          Ref: EnvironmentName
+        DynamoDBTableArn:
+          Fn::GetAtt:
+          - DynamoDBStack
+          - Outputs.TableArn
+        EventBridgeBusArn:
+          Fn::Sub: arn:aws:events:${AWS::Region}:${AWS::AccountId}:event-bus/${EnvironmentName}-eventforge-bus
+        ReceiptsBucketArn:
+          Fn::GetAtt:
+          - ReceiptsBucket
+          - Arn
+        EmailQueueArn:
+          Fn::GetAtt:
+          - SQSStack
+          - Outputs.EmailQueueArn
+        PDFQueueArn:
+          Fn::GetAtt:
+          - SQSStack
+          - Outputs.PdfQueueArn
+        WebhookQueueArn:
+          Fn::GetAtt:
+          - SQSStack
+          - Outputs.WebhookQueueArn
+      Tags:
+      - Key: Environment
+        Value:
+          Ref: EnvironmentName
+      - Key: StackLayer
+        Value: security
+    Metadata:
+      SamResourceId: IAMStack
+  ECSStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+    - VPCStack
+    - IAMStack
+    - CognitoStack
+    - DynamoDBStack
+    Properties:
+      TemplateURL: https://s3.us-east-1.amazonaws.com/aws-sam-cli-managed-default-samclisourcebucket-mxumdgpwbdki/eventforge-dev/9955f5079ac052932124f96408c83ab3.template
+      Parameters:
+        EnvironmentName:
+          Ref: EnvironmentName
+        VpcId:
+          Fn::GetAtt:
+          - VPCStack
+          - Outputs.VpcId
+        PublicSubnet1:
+          Fn::GetAtt:
+          - VPCStack
+          - Outputs.PublicSubnet1Id
+        PublicSubnet2:
+          Fn::GetAtt:
+          - VPCStack
+          - Outputs.PublicSubnet2Id
+        PrivateSubnet1:
+          Fn::GetAtt:
+          - VPCStack
+          - Outputs.PrivateSubnet1Id
+        PrivateSubnet2:
+          Fn::GetAtt:
+          - VPCStack
+          - Outputs.PrivateSubnet2Id
+        ECSTaskRoleArn:
+          Fn::GetAtt:
+          - IAMStack
+          - Outputs.ECSTaskRoleArn
+        ECSTaskExecutionRoleArn:
+          Fn::GetAtt:
+          - IAMStack
+          - Outputs.ECSTaskExecutionRoleArn
+        ContainerImage:
+          Ref: ContainerImage
+        CognitoUserPoolId:
+          Fn::GetAtt:
+          - CognitoStack
+          - Outputs.UserPoolId
+        DynamoDBTableName:
+          Fn::GetAtt:
+          - DynamoDBStack
+          - Outputs.TableName
+        EventBusName:
+          Fn::Sub: ${EnvironmentName}-eventforge-bus
+        ReceiptsBucketName:
+          Ref: ReceiptsBucket
+        EcsMinTasks:
+          Ref: EcsMinTasks
+        EcsMaxTasks:
+          Ref: EcsMaxTasks
+      Tags:
+      - Key: Environment
+        Value:
+          Ref: EnvironmentName
+      - Key: StackLayer
+        Value: compute
+    Metadata:
+      SamResourceId: ECSStack
+  EventBridgeStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+    - SQSStack
+    - OrderWorkflowStateMachine
+    Properties:
+      TemplateURL: https://s3.us-east-1.amazonaws.com/aws-sam-cli-managed-default-samclisourcebucket-mxumdgpwbdki/eventforge-dev/811e130ac5b562966f80af123a9336d7.template
+      Parameters:
+        EnvironmentName:
+          Ref: EnvironmentName
+        StepFunctionsArn:
+          Ref: OrderWorkflowStateMachine
+        EmailQueueArn:
+          Fn::GetAtt:
+          - SQSStack
+          - Outputs.EmailQueueArn
+        PDFQueueArn:
+          Fn::GetAtt:
+          - SQSStack
+          - Outputs.PdfQueueArn
+        WebhookQueueArn:
+          Fn::GetAtt:
+          - SQSStack
+          - Outputs.WebhookQueueArn
+      Tags:
+      - Key: Environment
+        Value:
+          Ref: EnvironmentName
+      - Key: StackLayer
+        Value: eventing
+    Metadata:
+      SamResourceId: EventBridgeStack
+  LambdasStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+    - IAMStack
+    - SQSStack
+    - DynamoDBStack
+    Properties:
+      TemplateURL: https://s3.us-east-1.amazonaws.com/aws-sam-cli-managed-default-samclisourcebucket-mxumdgpwbdki/eventforge-dev/c89539c924c3ca179078ec62c6933ff0.template
+      Parameters:
+        EnvironmentName:
+          Ref: EnvironmentName
+        DynamoDBTableName:
+          Fn::GetAtt:
+          - DynamoDBStack
+          - Outputs.TableName
+        EventBusName:
+          Fn::Sub: ${EnvironmentName}-eventforge-bus
+        ReceiptsBucketName:
+          Fn::Sub: ${EnvironmentName}-eventforge-receipts-${AWS::AccountId}
+        EmailQueueArn:
+          Fn::GetAtt:
+          - SQSStack
+          - Outputs.EmailQueueArn
+        PdfQueueArn:
+          Fn::GetAtt:
+          - SQSStack
+          - Outputs.PdfQueueArn
+        WebhookQueueArn:
+          Fn::GetAtt:
+          - SQSStack
+          - Outputs.WebhookQueueArn
+        WorkflowRoleArn:
+          Fn::GetAtt:
+          - IAMStack
+          - Outputs.LambdaWorkflowExecutionRoleArn
+        EmailProcessorRoleArn:
+          Fn::GetAtt:
+          - IAMStack
+          - Outputs.LambdaEmailProcessorRoleArn
+        PdfProcessorRoleArn:
+          Fn::GetAtt:
+          - IAMStack
+          - Outputs.LambdaPDFProcessorRoleArn
+        WebhookProcessorRoleArn:
+          Fn::GetAtt:
+          - IAMStack
+          - Outputs.LambdaWebhookProcessorRoleArn
+        IngestRoleArn:
+          Fn::GetAtt:
+          - IAMStack
+          - Outputs.LambdaWebhookIngestRoleArn
+      Tags:
+      - Key: Environment
+        Value:
+          Ref: EnvironmentName
+      - Key: StackLayer
+        Value: compute
+    Metadata:
+      SamResourceId: LambdasStack
+  APIGatewayStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+    - LambdasStack
+    Properties:
+      TemplateURL: https://s3.us-east-1.amazonaws.com/aws-sam-cli-managed-default-samclisourcebucket-mxumdgpwbdki/eventforge-dev/7663188a3224ecdf31fe8c33cac0a271.template
+      Parameters:
+        EnvironmentName:
+          Ref: EnvironmentName
+        WebhookIngestFunctionArn:
+          Fn::GetAtt:
+          - LambdasStack
+          - Outputs.WebhookIngestFunctionArn
+      Tags:
+      - Key: Environment
+        Value:
+          Ref: EnvironmentName
+      - Key: StackLayer
+        Value: api
+    Metadata:
+      SamResourceId: APIGatewayStack
+  DashboardBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${EnvironmentName}-eventforge-dashboard-${AWS::AccountId}
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      Tags:
+      - Key: Environment
+        Value:
+          Ref: EnvironmentName
+      - Key: Project
+        Value: EventForge
+    Metadata:
+      SamResourceId: DashboardBucket
+  DashboardBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: DashboardBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Sid: PublicReadGetObject
+          Effect: Allow
+          Principal: '*'
+          Action: s3:GetObject
+          Resource:
+            Fn::Sub: arn:aws:s3:::${EnvironmentName}-eventforge-dashboard-${AWS::AccountId}/*
+    Metadata:
+      SamResourceId: DashboardBucketPolicy
+  AlarmsStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+    - SQSStack
+    Properties:
+      TemplateURL: https://s3.us-east-1.amazonaws.com/aws-sam-cli-managed-default-samclisourcebucket-mxumdgpwbdki/eventforge-dev/4253ddde8e2cbdee30aeabe2ddff2bcc.template
+      Parameters:
+        EnvironmentName:
+          Ref: EnvironmentName
+        EmailDlqName:
+          Fn::Sub: ${EnvironmentName}-eventforge-email-dlq
+        PdfDlqName:
+          Fn::Sub: ${EnvironmentName}-eventforge-pdf-dlq
+        WebhookDlqName:
+          Fn::Sub: ${EnvironmentName}-eventforge-webhook-dlq
+      Tags:
+      - Key: Environment
+        Value:
+          Ref: EnvironmentName
+      - Key: StackLayer
+        Value: observability
+    Metadata:
+      SamResourceId: AlarmsStack
+Outputs:
+  VpcId:
+    Description: VPC ID
+    Value:
+      Fn::GetAtt:
+      - VPCStack
+      - Outputs.VpcId
+  PublicSubnets:
+    Description: Public subnet IDs (comma-separated)
+    Value:
+      Fn::GetAtt:
+      - VPCStack
+      - Outputs.PublicSubnets
+  PrivateSubnets:
+    Description: Private subnet IDs (comma-separated)
+    Value:
+      Fn::GetAtt:
+      - VPCStack
+      - Outputs.PrivateSubnets
+  DynamoDBTableName:
+    Description: DynamoDB table name
+    Value:
+      Fn::GetAtt:
+      - DynamoDBStack
+      - Outputs.TableName
+  DynamoDBTableArn:
+    Description: DynamoDB table ARN
+    Value:
+      Fn::GetAtt:
+      - DynamoDBStack
+      - Outputs.TableArn
+  ReceiptsBucketName:
+    Description: S3 bucket for PDF receipts
+    Value:
+      Ref: ReceiptsBucket
+  ReceiptsBucketArn:
+    Description: S3 receipts bucket ARN
+    Value:
+      Fn::GetAtt:
+      - ReceiptsBucket
+      - Arn
+  CognitoUserPoolId:
+    Description: Cognito User Pool ID
+    Value:
+      Fn::GetAtt:
+      - CognitoStack
+      - Outputs.UserPoolId
+  CognitoUserPoolClientId:
+    Description: Cognito User Pool Client ID
+    Value:
+      Fn::GetAtt:
+      - CognitoStack
+      - Outputs.UserPoolClientId
+  ALBDnsName:
+    Description: Application Load Balancer DNS name
+    Value:
+      Fn::GetAtt:
+      - ECSStack
+      - Outputs.ALBDnsName
+  ECSClusterArn:
+    Description: ECS Cluster ARN
+    Value:
+      Fn::GetAtt:
+      - ECSStack
+      - Outputs.ECSClusterArn
+  EventBusName:
+    Description: EventBridge custom bus name
+    Value:
+      Fn::GetAtt:
+      - EventBridgeStack
+      - Outputs.EventBusName
+  EventBusArn:
+    Description: EventBridge custom bus ARN
+    Value:
+      Fn::GetAtt:
+      - EventBridgeStack
+      - Outputs.EventBusArn
+  EmailQueueUrl:
+    Description: Email processing queue URL
+    Value:
+      Fn::GetAtt:
+      - SQSStack
+      - Outputs.EmailQueueUrl
+  PdfQueueUrl:
+    Description: PDF processing queue URL
+    Value:
+      Fn::GetAtt:
+      - SQSStack
+      - Outputs.PdfQueueUrl
+  WebhookQueueUrl:
+    Description: Webhook processing queue URL
+    Value:
+      Fn::GetAtt:
+      - SQSStack
+      - Outputs.WebhookQueueUrl
+  OrderWorkflowArn:
+    Description: Step Functions state machine ARN
+    Value:
+      Ref: OrderWorkflowStateMachine
+  WebhookApiEndpoint:
+    Description: API Gateway webhook ingestion endpoint
+    Value:
+      Fn::GetAtt:
+      - APIGatewayStack
+      - Outputs.WebhookApiEndpoint
+  DashboardUrl:
+    Description: Dashboard website URL
+    Value:
+      Fn::Sub: http://${EnvironmentName}-eventforge-dashboard-${AWS::AccountId}.s3-website-us-east-1.amazonaws.com
+  DashboardBucketName:
+    Description: S3 bucket for Dashboard static files
+    Value:
+      Ref: DashboardBucket
+  AlertsTopicArn:
+    Description: SNS topic ARN for operations alerts
+    Value:
+      Fn::GetAtt:
+      - AlarmsStack
+      - Outputs.AlertsTopicArn

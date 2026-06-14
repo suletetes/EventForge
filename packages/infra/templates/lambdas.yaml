@@ -63,7 +63,8 @@ Resources:
     Properties:
       FunctionName: !Sub '${EnvironmentName}-eventforge-validate-order'
       Runtime: nodejs20.x
-      Handler: dist/workflow/validate-order.handler
+      Handler: index.handler
+      CodeUri: ../../lambdas/bundle/validate-order/
       Timeout: 30
       MemorySize: 128
       Role: !Ref WorkflowRoleArn
@@ -83,7 +84,8 @@ Resources:
     Properties:
       FunctionName: !Sub '${EnvironmentName}-eventforge-reserve-inventory'
       Runtime: nodejs20.x
-      Handler: dist/workflow/reserve-inventory.handler
+      Handler: index.handler
+      CodeUri: ../../lambdas/bundle/reserve-inventory/
       Timeout: 30
       MemorySize: 128
       Role: !Ref WorkflowRoleArn
@@ -103,7 +105,8 @@ Resources:
     Properties:
       FunctionName: !Sub '${EnvironmentName}-eventforge-charge-payment'
       Runtime: nodejs20.x
-      Handler: dist/workflow/charge-payment.handler
+      Handler: index.handler
+      CodeUri: ../../lambdas/bundle/charge-payment/
       Timeout: 30
       MemorySize: 128
       Role: !Ref WorkflowRoleArn
@@ -123,7 +126,8 @@ Resources:
     Properties:
       FunctionName: !Sub '${EnvironmentName}-eventforge-confirm-order'
       Runtime: nodejs20.x
-      Handler: dist/workflow/confirm-order.handler
+      Handler: index.handler
+      CodeUri: ../../lambdas/bundle/confirm-order/
       Timeout: 30
       MemorySize: 128
       Role: !Ref WorkflowRoleArn
@@ -143,7 +147,8 @@ Resources:
     Properties:
       FunctionName: !Sub '${EnvironmentName}-eventforge-release-inventory'
       Runtime: nodejs20.x
-      Handler: dist/workflow/release-inventory.handler
+      Handler: index.handler
+      CodeUri: ../../lambdas/bundle/release-inventory/
       Timeout: 30
       MemorySize: 128
       Role: !Ref WorkflowRoleArn
@@ -163,7 +168,8 @@ Resources:
     Properties:
       FunctionName: !Sub '${EnvironmentName}-eventforge-order-failed'
       Runtime: nodejs20.x
-      Handler: dist/workflow/order-failed.handler
+      Handler: index.handler
+      CodeUri: ../../lambdas/bundle/order-failed/
       Timeout: 30
       MemorySize: 128
       Role: !Ref WorkflowRoleArn
@@ -188,7 +194,8 @@ Resources:
     Properties:
       FunctionName: !Sub '${EnvironmentName}-eventforge-email-processor'
       Runtime: nodejs20.x
-      Handler: dist/processors/email-processor.handler
+      Handler: index.handler
+      CodeUri: ../../lambdas/bundle/email-processor/
       Timeout: 30
       MemorySize: 128
       Role: !Ref EmailProcessorRoleArn
@@ -214,7 +221,8 @@ Resources:
     Properties:
       FunctionName: !Sub '${EnvironmentName}-eventforge-pdf-processor'
       Runtime: nodejs20.x
-      Handler: dist/processors/pdf-processor.handler
+      Handler: index.handler
+      CodeUri: ../../lambdas/bundle/pdf-processor/
       Timeout: 60
       MemorySize: 512
       Role: !Ref PdfProcessorRoleArn
@@ -240,7 +248,8 @@ Resources:
     Properties:
       FunctionName: !Sub '${EnvironmentName}-eventforge-webhook-processor'
       Runtime: nodejs20.x
-      Handler: dist/processors/webhook-processor.handler
+      Handler: index.handler
+      CodeUri: ../../lambdas/bundle/webhook-processor/
       Timeout: 30
       MemorySize: 128
       Role: !Ref WebhookProcessorRoleArn
@@ -271,7 +280,8 @@ Resources:
     Properties:
       FunctionName: !Sub '${EnvironmentName}-eventforge-webhook-ingest'
       Runtime: nodejs20.x
-      Handler: dist/ingestion/webhook-ingest.handler
+      Handler: index.handler
+      CodeUri: ../../lambdas/bundle/webhook-ingest/
       Timeout: 10
       MemorySize: 128
       Role: !Ref IngestRoleArn

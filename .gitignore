@@ -5,6 +5,7 @@ node_modules/
 dist/
 build/
 .build/
+packages/lambdas/bundle/
 
 # Coverage
 coverage/
@@ -27,6 +28,7 @@ Thumbs.db
 # AWS SAM
 .aws-sam/
 samconfig.toml
+packaged.yaml
 
 # TypeScript
 *.tsbuildinfo
