@@ -74,6 +74,9 @@ Resources:
         - Id: StepFunctionsTarget
           Arn: !Ref StepFunctionsArn
           RoleArn: !GetAtt EventBridgeStepFunctionsRole.Arn
+          # Unwrap the EventBridge envelope so the state machine receives the
+          # order detail ({orderId, userId, items, total, ...}) at the root path.
+          InputPath: '$.detail'
 
   # =============================================================
   # Rule: order-completed-email-rule

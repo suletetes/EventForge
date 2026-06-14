@@ -383,6 +383,7 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:Query
                   - dynamodb:Scan
+                  - dynamodb:PutItem
                 Resource:
                   - !Ref DynamoDBTableArn
                   - !Sub '${DynamoDBTableArn}/index/*'
