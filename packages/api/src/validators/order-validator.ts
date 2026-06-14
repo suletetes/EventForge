@@ -12,6 +12,7 @@ import { OrderItem } from '@eventforge/shared';
 /** A validated order ready for processing (pre-persistence fields) */
 export interface ValidatedOrder {
   userId: string;
+  customerEmail?: string;
   items: OrderItem[];
   total: number;
 }
@@ -137,6 +138,9 @@ export function validateOrderRequest(body: unknown): ValidationResult {
     valid: true,
     order: {
       userId: (request.userId as string).trim(),
+      customerEmail: typeof request.customerEmail === 'string' && request.customerEmail.trim().length > 0
+        ? request.customerEmail.trim()
+        : undefined,
       items: (request.items as Record<string, unknown>[]).map((item) => ({
         productId: (item.productId as string).trim(),
         name: (item.name as string).trim(),

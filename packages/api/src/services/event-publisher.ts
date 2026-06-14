@@ -17,6 +17,9 @@ export interface EventDetail {
   userId: string;
   status: string;
   timestamp: string;
+  customerEmail?: string;
+  items?: Array<{ productId: string; name: string; quantity: number; price: number }>;
+  total?: number;
   traceId?: string;
   metadata?: Record<string, unknown>;
 }
