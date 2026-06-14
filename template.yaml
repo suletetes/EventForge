@@ -231,6 +231,8 @@ Resources:
     DependsOn:
       - VPCStack
       - IAMStack
+      - CognitoStack
+      - DynamoDBStack
     Properties:
       TemplateURL: packages/infra/templates/ecs.yaml
       Parameters:

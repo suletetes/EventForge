@@ -5,7 +5,7 @@
   "States": {
     "ValidateOrder": {
       "Type": "Task",
-      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-eventforge-validate-order",
+      "Resource": "${ValidateOrderFunctionArn}",
       "Parameters": {
         "orderId.$": "$.orderId",
         "userId.$": "$.userId",
@@ -25,7 +25,7 @@
     },
     "ReserveInventory": {
       "Type": "Task",
-      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-eventforge-reserve-inventory",
+      "Resource": "${ReserveInventoryFunctionArn}",
       "Parameters": {
         "orderId.$": "$.orderId",
         "userId.$": "$.userId",
@@ -53,7 +53,7 @@
     },
     "ChargePayment": {
       "Type": "Task",
-      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-eventforge-charge-payment",
+      "Resource": "${ChargePaymentFunctionArn}",
       "Parameters": {
         "orderId.$": "$.orderId",
         "userId.$": "$.userId",
@@ -73,7 +73,7 @@
     },
     "ConfirmOrder": {
       "Type": "Task",
-      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-eventforge-confirm-order",
+      "Resource": "${ConfirmOrderFunctionArn}",
       "Parameters": {
         "orderId.$": "$.orderId",
         "userId.$": "$.userId",
@@ -93,7 +93,7 @@
     },
     "ReleaseInventory": {
       "Type": "Task",
-      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-eventforge-release-inventory",
+      "Resource": "${ReleaseInventoryFunctionArn}",
       "Parameters": {
         "orderId.$": "$.orderId",
         "userId.$": "$.userId",
@@ -113,6 +113,20 @@
       "Next": "OrderFailed"
     },
     "OrderFailed": {
+      "Type": "Task",
+      "Resource": "${OrderFailedFunctionArn}",
+      "Parameters": {
+        "orderId.$": "$.orderId",
+        "userId.$": "$.userId",
+        "items.$": "$.items",
+        "total.$": "$.total",
+        "error.$": "$.error"
+      },
+      "ResultPath": "$.failResult",
+      "OutputPath": "$",
+      "Next": "FailExecution"
+    },
+    "FailExecution": {
       "Type": "Fail",
       "Error": "OrderProcessingFailed",
       "Cause": "Order processing failed during workflow execution"
