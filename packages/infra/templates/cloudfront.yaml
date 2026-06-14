@@ -1,5 +1,4 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Transform: AWS::Serverless-2016-10-31
 Description: EventForge S3 and CloudFront hosting for the React Dashboard
 
 Parameters:
@@ -30,43 +29,50 @@ Resources:
 
   DashboardBucketPolicy:
     Type: AWS::S3::BucketPolicy
+    DependsOn: DashboardDistribution
     Properties:
       Bucket: !Ref DashboardBucket
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Sid: AllowCloudFrontOAIAccess
+          - Sid: AllowCloudFrontServicePrincipal
             Effect: Allow
             Principal:
-              CanonicalUser: !GetAtt CloudFrontOriginAccessIdentity.S3CanonicalUserId
-            Action: 's3:GetObject'
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
             Resource: !Sub '${DashboardBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${DashboardDistribution}'
 
-  CloudFrontOriginAccessIdentity:
-    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
     Properties:
-      CloudFrontOriginAccessIdentityConfig:
-        Comment: !Sub 'OAI for ${EnvironmentName}-eventforge-dashboard'
+      OriginAccessControlConfig:
+        Name: !Sub '${EnvironmentName}-eventforge-dashboard-oac'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
 
   DashboardDistribution:
     Type: AWS::CloudFront::Distribution
     Properties:
       DistributionConfig:
         Enabled: true
-        Comment: !Sub '${EnvironmentName} EventForge Dashboard Distribution'
+        Comment: !Sub '${EnvironmentName} EventForge Dashboard'
         DefaultRootObject: index.html
         Origins:
-          - Id: S3DashboardOrigin
+          - Id: S3Origin
             DomainName: !GetAtt DashboardBucket.RegionalDomainName
+            OriginAccessControlId: !Ref CloudFrontOAC
             S3OriginConfig:
-              OriginAccessIdentity: !Sub 'origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}'
+              OriginAccessIdentity: ''
         DefaultCacheBehavior:
-          TargetOriginId: S3DashboardOrigin
+          TargetOriginId: S3Origin
           ViewerProtocolPolicy: redirect-to-https
           AllowedMethods:
             - GET
             - HEAD
-            - OPTIONS
           CachedMethods:
             - GET
             - HEAD
@@ -96,7 +102,7 @@ Resources:
 
 Outputs:
   CloudFrontDistributionDomainName:
-    Description: CloudFront distribution domain name for the Dashboard
+    Description: CloudFront distribution domain name
     Value: !GetAtt DashboardDistribution.DomainName
     Export:
       Name: !Sub '${EnvironmentName}-EventForgeCloudFrontDomain'
@@ -105,3 +111,8 @@ Outputs:
     Value: !Ref DashboardBucket
     Export:
       Name: !Sub '${EnvironmentName}-EventForgeDashboardBucket'
+  CloudFrontDistributionId:
+    Description: CloudFront distribution ID
+    Value: !Ref DashboardDistribution
+    Export:
+      Name: !Sub '${EnvironmentName}-EventForgeCloudFrontDistId'

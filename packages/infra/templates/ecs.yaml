@@ -44,6 +44,22 @@ Parameters:
     Type: String
     Description: Docker image URI for the API service container
 
+  CognitoUserPoolId:
+    Type: String
+    Description: Cognito User Pool ID used by the API for JWT validation
+
+  DynamoDBTableName:
+    Type: String
+    Description: DynamoDB table name used by the API data layer
+
+  EventBusName:
+    Type: String
+    Description: EventBridge custom bus name used by the API event publisher
+
+  ReceiptsBucketName:
+    Type: String
+    Description: S3 bucket name for PDF receipts referenced by the orders route
+
   EcsMinTasks:
     Type: Number
     Default: 1
@@ -102,6 +118,16 @@ Resources:
               Value: production
             - Name: PORT
               Value: '3000'
+            - Name: COGNITO_USER_POOL_ID
+              Value: !Ref CognitoUserPoolId
+            - Name: COGNITO_REGION
+              Value: !Ref AWS::Region
+            - Name: DYNAMODB_TABLE
+              Value: !Ref DynamoDBTableName
+            - Name: EVENT_BUS_NAME
+              Value: !Ref EventBusName
+            - Name: RECEIPTS_BUCKET
+              Value: !Ref ReceiptsBucketName
           LogConfiguration:
             LogDriver: awslogs
             Options:
