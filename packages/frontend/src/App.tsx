@@ -1,15 +1,5 @@
-/**
- * Main App component with authentication check.
- * Validates: Requirements 9.1, 9.5, 9.6
- *
- * - Checks authentication state on mount
- * - Redirects to Cognito login if unauthenticated or token expired
- * - Renders a loading state while checking auth
- * - Renders Dashboard when authenticated (task 14.2)
- */
-
 import React, { useEffect, useState } from 'react';
-import { isAuthenticated, redirectToLogin, logout } from './auth';
+import { isAuthenticated, login, logout } from './auth';
 import { Dashboard } from './components/Dashboard';
 
 type AuthState = 'loading' | 'authenticated' | 'unauthenticated';
@@ -17,67 +7,89 @@ type AuthState = 'loading' | 'authenticated' | 'unauthenticated';
 export function App(): React.ReactElement {
   const [authState, setAuthState] = useState<AuthState>('loading');
   const [error, setError] = useState<string | null>(null);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loggingIn, setLoggingIn] = useState(false);
 
   useEffect(() => {
     checkAuth();
   }, []);
 
-  async function checkAuth(): Promise<void> {
+  async function checkAuth() {
     try {
-      const authenticated = await isAuthenticated();
-      if (authenticated) {
-        setAuthState('authenticated');
-      } else {
-        // Redirect to Cognito login page
-        setAuthState('unauthenticated');
-        await redirectToLogin();
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Authentication check failed');
+      const authed = await isAuthenticated();
+      setAuthState(authed ? 'authenticated' : 'unauthenticated');
+    } catch {
       setAuthState('unauthenticated');
     }
   }
 
-  async function handleLogout(): Promise<void> {
+  async function handleLogin(e: React.FormEvent) {
+    e.preventDefault();
+    setLoggingIn(true);
+    setError(null);
+    try {
+      const success = await login(email, password);
+      if (success) {
+        setAuthState('authenticated');
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Login failed');
+    }
+    setLoggingIn(false);
+  }
+
+  async function handleLogout() {
     await logout();
     setAuthState('unauthenticated');
   }
 
   if (authState === 'loading') {
-    return (
-      <div className="app app--loading">
-        <p>Loading...</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="app app--error">
-        <p>Error: {error}</p>
-        <button onClick={checkAuth}>Retry</button>
-      </div>
-    );
+    return <div style={{ padding: 40, textAlign: 'center' }}>Loading...</div>;
   }
 
   if (authState === 'unauthenticated') {
     return (
-      <div className="app app--unauthenticated">
-        <p>Redirecting to login...</p>
+      <div style={{ maxWidth: 400, margin: '80px auto', padding: 20, fontFamily: 'system-ui' }}>
+        <h1 style={{ fontSize: 24 }}>EventForge</h1>
+        <p style={{ color: '#666' }}>Sign in to view the event dashboard</p>
+        {error && <p style={{ color: 'red' }}>{error}</p>}
+        <form onSubmit={handleLogin}>
+          <input
+            type="email"
+            placeholder="Email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            style={{ display: 'block', width: '100%', padding: 10, marginBottom: 10, boxSizing: 'border-box' }}
+            required
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            style={{ display: 'block', width: '100%', padding: 10, marginBottom: 10, boxSizing: 'border-box' }}
+            required
+          />
+          <button
+            type="submit"
+            disabled={loggingIn}
+            style={{ width: '100%', padding: 12, background: '#0066cc', color: 'white', border: 'none', cursor: 'pointer' }}
+          >
+            {loggingIn ? 'Signing in...' : 'Sign In'}
+          </button>
+        </form>
       </div>
     );
   }
 
-  // Authenticated — render dashboard with event polling
   return (
-    <div className="app app--authenticated">
-      <header className="app-header">
-        <h1>EventForge Dashboard</h1>
-        <button onClick={handleLogout}>Sign Out</button>
+    <div style={{ fontFamily: 'system-ui', padding: 20 }}>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <h1 style={{ fontSize: 20, margin: 0 }}>EventForge Dashboard</h1>
+        <button onClick={handleLogout} style={{ padding: '8px 16px', cursor: 'pointer' }}>Sign Out</button>
       </header>
-      <main className="app-main">
-        <Dashboard />
-      </main>
+      <Dashboard />
     </div>
   );
 }

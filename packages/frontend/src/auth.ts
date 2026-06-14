@@ -1,43 +1,25 @@
 /**
- * Authentication configuration and helpers using AWS Amplify/Cognito.
- * Validates: Requirements 9.5, 9.6
- *
- * - Configures Amplify with Cognito user pool settings
- * - Provides helpers to check auth state and get JWT tokens
- * - Redirects to Cognito login if unauthenticated or token expired
+ * Authentication using AWS Amplify with Cognito.
+ * Uses direct sign-in (username/password) instead of OAuth redirect
+ * since S3 static hosting only serves HTTP.
  */
 
 import { Amplify } from 'aws-amplify';
 import {
   fetchAuthSession,
-  signInWithRedirect,
+  signIn,
   signOut,
+  signUp,
   getCurrentUser,
 } from '@aws-amplify/auth';
-
-/** Auth configuration loaded from environment variables */
-const authConfig = {
-  userPoolId: process.env.REACT_APP_COGNITO_USER_POOL_ID || '',
-  userPoolClientId: process.env.REACT_APP_COGNITO_CLIENT_ID || '',
-  loginWith: {
-    oauth: {
-      domain: process.env.REACT_APP_COGNITO_DOMAIN || '',
-      scopes: ['openid', 'email', 'profile'],
-      redirectSignIn: [process.env.REACT_APP_REDIRECT_SIGN_IN || window.location.origin],
-      redirectSignOut: [process.env.REACT_APP_REDIRECT_SIGN_OUT || window.location.origin],
-      responseType: 'code' as const,
-    },
-  },
-};
 
 /** Initialize Amplify with Cognito configuration */
 export function configureAuth(): void {
   Amplify.configure({
     Auth: {
       Cognito: {
-        userPoolId: authConfig.userPoolId,
-        userPoolClientId: authConfig.userPoolClientId,
-        loginWith: authConfig.loginWith,
+        userPoolId: import.meta.env.VITE_COGNITO_USER_POOL_ID || '',
+        userPoolClientId: import.meta.env.VITE_COGNITO_CLIENT_ID || '',
       },
     },
   });
@@ -45,21 +27,18 @@ export function configureAuth(): void {
 
 /**
  * Get the current JWT access token.
- * Returns the token string if authenticated, or null if not.
  */
 export async function getAccessToken(): Promise<string | null> {
   try {
     const session = await fetchAuthSession();
-    const token = session.tokens?.accessToken?.toString() ?? null;
-    return token;
+    return session.tokens?.accessToken?.toString() ?? null;
   } catch {
     return null;
   }
 }
 
 /**
- * Check if the user is currently authenticated with a valid session.
- * Returns true if a valid token exists, false otherwise.
+ * Check if user is authenticated.
  */
 export async function isAuthenticated(): Promise<boolean> {
   try {
@@ -72,31 +51,37 @@ export async function isAuthenticated(): Promise<boolean> {
 }
 
 /**
- * Redirect the user to the Cognito hosted login page.
- * Called when the user is not authenticated or their token has expired.
+ * Sign in with username and password.
  */
-export async function redirectToLogin(): Promise<void> {
-  await signInWithRedirect();
+export async function login(username: string, password: string): Promise<boolean> {
+  try {
+    const result = await signIn({ username, password });
+    return result.isSignedIn;
+  } catch (error) {
+    console.error('Login failed:', error);
+    throw error;
+  }
 }
 
 /**
- * Sign out the current user and clear the session.
+ * Sign up a new user.
+ */
+export async function register(email: string, password: string): Promise<void> {
+  await signUp({
+    username: email,
+    password,
+    options: { userAttributes: { email } },
+  });
+}
+
+/**
+ * Sign out.
  */
 export async function logout(): Promise<void> {
   await signOut();
 }
 
-/**
- * Ensure the user is authenticated. If not, redirect to login.
- * Returns the JWT token if authenticated.
- */
-export async function ensureAuthenticated(): Promise<string> {
-  const token = await getAccessToken();
-  if (!token) {
-    await redirectToLogin();
-    // This line won't execute since redirectToLogin navigates away,
-    // but TypeScript needs a return path
-    throw new Error('Redirecting to login');
-  }
-  return token;
+/** No-op for backwards compat */
+export async function redirectToLogin(): Promise<void> {
+  // No redirect needed, app shows login form
 }
