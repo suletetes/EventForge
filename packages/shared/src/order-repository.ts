@@ -40,6 +40,7 @@ export interface OrderItem {
 export interface Order {
   orderId: string;
   userId: string;
+  customerEmail?: string;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   items: OrderItem[];
   total: number;

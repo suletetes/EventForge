@@ -29,6 +29,7 @@ interface OrderItem {
 export interface ConfirmOrderInput {
   orderId: string;
   userId: string;
+  customerEmail?: string;
   items: OrderItem[];
   total: number;
   status: string;
@@ -37,6 +38,7 @@ export interface ConfirmOrderInput {
 export interface ConfirmOrderOutput {
   orderId: string;
   userId: string;
+  customerEmail?: string;
   items: OrderItem[];
   total: number;
   status: 'completed';
@@ -47,7 +49,7 @@ const docClient = DynamoDBDocumentClient.from(dynamoClient);
 const eventBridgeClient = new EventBridgeClient({});
 
 export const handler = async (event: ConfirmOrderInput): Promise<ConfirmOrderOutput> => {
-  const { orderId, userId, items, total } = event;
+  const { orderId, userId, customerEmail, items, total } = event;
 
   console.log(`Confirming order ${orderId} for user ${userId}`);
 
@@ -70,6 +72,7 @@ export const handler = async (event: ConfirmOrderInput): Promise<ConfirmOrderOut
           Detail: JSON.stringify({
             orderId,
             userId,
+            customerEmail,
             items,
             total,
             status: 'completed',
@@ -87,6 +90,7 @@ export const handler = async (event: ConfirmOrderInput): Promise<ConfirmOrderOut
   return {
     orderId,
     userId,
+    customerEmail,
     items,
     total,
     status: 'completed',
