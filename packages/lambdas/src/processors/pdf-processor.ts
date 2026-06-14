@@ -31,6 +31,35 @@ export interface PDFQueueMessage {
 const s3Client = new S3Client({});
 
 /**
+ * Extracts the domain message from an SQS record body.
+ *
+ * Unwraps the EventBridge envelope ({ "detail-type", source, detail })
+ * when present; otherwise treats the parsed body as the domain message
+ * directly (supports direct SQS sends and unit tests).
+ */
+export function extractPDFMessage(body: string): PDFQueueMessage {
+  const parsed = JSON.parse(body) as Record<string, unknown>;
+
+  const isEnvelope =
+    parsed && typeof parsed === 'object' &&
+    typeof parsed['detail'] === 'object' && parsed['detail'] !== null &&
+    'detail-type' in parsed;
+
+  const detail = (isEnvelope ? parsed['detail'] : parsed) as Record<string, unknown>;
+
+  const orderId = (detail['orderId'] as string) ?? 'unknown';
+
+  return {
+    orderId,
+    userId: (detail['userId'] as string) ?? 'unknown',
+    items: (detail['items'] as PDFQueueMessage['items']) ?? [],
+    total: (detail['total'] as number) ?? (detail['orderTotal'] as number) ?? 0,
+    timestamp: (detail['timestamp'] as string) ?? new Date().toISOString(),
+    s3Key: (detail['s3Key'] as string) ?? `receipts/${orderId}.pdf`,
+  };
+}
+
+/**
  * Generates a simple PDF buffer for the receipt.
  * Uses a minimal PDF structure with order details rendered as text.
  */
@@ -131,7 +160,7 @@ function createMinimalPDF(text: string): Buffer {
 
 export const handler: SQSHandler = async (event: SQSEvent): Promise<void> => {
   for (const record of event.Records) {
-    const message: PDFQueueMessage = JSON.parse(record.body);
+    const message = extractPDFMessage(record.body);
 
     console.log(`Processing PDF receipt for order ${message.orderId}`);
 

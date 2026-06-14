@@ -13,6 +13,7 @@
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, ScanCommand } from '@aws-sdk/lib-dynamodb';
+import { storeEvent } from '@eventforge/shared';
 import type { SQSEvent } from 'aws-lambda';
 
 const TABLE_NAME = process.env.DYNAMODB_TABLE || 'eventforge-events';
@@ -104,6 +105,36 @@ export async function deliverToUrl(
 }
 
 /**
+ * Extracts the webhook message from an SQS record body.
+ *
+ * Unwraps the EventBridge envelope when present, mapping envelope fields
+ * (`id` -> eventId, `detail-type` -> detailType) into the domain shape.
+ * Falls back to treating the parsed body as the domain message directly
+ * (supports direct SQS sends and unit tests).
+ */
+export function extractWebhookMessage(body: string): WebhookQueueMessage {
+  const parsed = JSON.parse(body) as Record<string, unknown>;
+
+  const isEnvelope =
+    parsed && typeof parsed === 'object' &&
+    typeof parsed['detail'] === 'object' && parsed['detail'] !== null &&
+    'detail-type' in parsed;
+
+  if (isEnvelope) {
+    const detail = parsed['detail'] as Record<string, unknown>;
+    return {
+      eventId: (parsed['id'] as string) ?? '',
+      source: (parsed['source'] as string) ?? '',
+      detailType: (parsed['detail-type'] as string) ?? '',
+      detail,
+      timestamp: (parsed['time'] as string) ?? (detail['timestamp'] as string) ?? new Date().toISOString(),
+    };
+  }
+
+  return parsed as unknown as WebhookQueueMessage;
+}
+
+/**
  * Lambda handler for the Webhook Processor.
  *
  * For each SQS record:
@@ -115,7 +146,28 @@ export async function deliverToUrl(
  */
 export async function handler(event: SQSEvent): Promise<void> {
   for (const record of event.Records) {
-    const message: WebhookQueueMessage = JSON.parse(record.body);
+    const message = extractWebhookMessage(record.body);
+
+    // Persist the event to DynamoDB so it appears in the dashboard's
+    // "Recent Events" panel and the per-order event history. Events tied to
+    // an order (detail.orderId) are stored under that order's partition.
+    // storeEvent is idempotent on (orderId, eventId+timestamp), so SQS
+    // re-delivery does not create duplicates.
+    const orderId = message.detail?.['orderId'];
+    if (orderId && typeof orderId === 'string') {
+      try {
+        await storeEvent(orderId, {
+          eventId: message.eventId || `${message.timestamp}-${message.detailType}`,
+          eventType: message.detailType,
+          payload: message.detail,
+          source: message.source,
+          timestamp: message.timestamp,
+        });
+      } catch (err) {
+        // Persistence failure should not block webhook delivery; log and continue.
+        console.error(`Failed to persist event for order ${orderId}:`, err);
+      }
+    }
 
     const urls = await getRegisteredWebhookUrls(docClient);
 

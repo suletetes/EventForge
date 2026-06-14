@@ -28,6 +28,37 @@ export interface EmailQueueMessage {
 const sesClient = new SESClient({ region: AWS_REGION });
 
 /**
+ * Extracts the domain message from an SQS record body.
+ *
+ * EventBridge delivers events to SQS wrapped in an envelope
+ * ({ version, id, "detail-type", source, detail: {...} }). When the
+ * parsed body looks like an EventBridge envelope, the inner `detail`
+ * is returned. Otherwise the parsed body is treated as the domain
+ * message directly (supports direct SQS sends and unit tests).
+ *
+ * Field aliases are normalized: `total` -> `orderTotal`.
+ */
+export function extractEmailMessage(body: string): Partial<EmailQueueMessage> {
+  const parsed = JSON.parse(body) as Record<string, unknown>;
+
+  const isEnvelope =
+    parsed && typeof parsed === 'object' &&
+    typeof parsed['detail'] === 'object' && parsed['detail'] !== null &&
+    'detail-type' in parsed;
+
+  const detail = (isEnvelope ? parsed['detail'] : parsed) as Record<string, unknown>;
+
+  return {
+    orderId: detail['orderId'] as string,
+    userId: detail['userId'] as string,
+    customerEmail: (detail['customerEmail'] as string) ?? (detail['email'] as string),
+    orderTotal: (detail['orderTotal'] as number) ?? (detail['total'] as number),
+    items: (detail['items'] as EmailQueueMessage['items']) ?? [],
+    timestamp: detail['timestamp'] as string,
+  };
+}
+
+/**
  * Builds the HTML email body for an order confirmation.
  */
 export function buildEmailBody(message: EmailQueueMessage): string {
@@ -90,22 +121,40 @@ export function isTransientError(error: unknown): boolean {
  */
 export const handler: SQSHandler = async (event: SQSEvent): Promise<void> => {
   for (const record of event.Records) {
-    const message: EmailQueueMessage = JSON.parse(record.body);
+    const message = extractEmailMessage(record.body);
+
+    // Without a recipient email we cannot send. Skip gracefully rather than
+    // crashing (which would poison the queue and fill the DLQ).
+    if (!message.customerEmail) {
+      console.warn(
+        `Skipping email for order ${message.orderId ?? 'unknown'}: no customerEmail in event payload`
+      );
+      continue;
+    }
+
+    const fullMessage: EmailQueueMessage = {
+      orderId: message.orderId ?? 'unknown',
+      userId: message.userId ?? 'unknown',
+      customerEmail: message.customerEmail,
+      orderTotal: message.orderTotal ?? 0,
+      items: message.items ?? [],
+      timestamp: message.timestamp ?? new Date().toISOString(),
+    };
 
     console.log(
-      `Processing email for order ${message.orderId} to ${message.customerEmail}`
+      `Processing email for order ${fullMessage.orderId} to ${fullMessage.customerEmail}`
     );
 
-    const htmlBody = buildEmailBody(message);
+    const htmlBody = buildEmailBody(fullMessage);
 
     const sendEmailCommand = new SendEmailCommand({
       Source: SENDER_EMAIL,
       Destination: {
-        ToAddresses: [message.customerEmail],
+        ToAddresses: [fullMessage.customerEmail],
       },
       Message: {
         Subject: {
-          Data: `Order Confirmation - ${message.orderId}`,
+          Data: `Order Confirmation - ${fullMessage.orderId}`,
           Charset: 'UTF-8',
         },
         Body: {
@@ -120,12 +169,12 @@ export const handler: SQSHandler = async (event: SQSEvent): Promise<void> => {
     try {
       await sesClient.send(sendEmailCommand);
       console.log(
-        `Successfully sent confirmation email for order ${message.orderId}`
+        `Successfully sent confirmation email for order ${fullMessage.orderId}`
       );
     } catch (error: unknown) {
       if (isTransientError(error)) {
         console.error(
-          `Transient error sending email for order ${message.orderId}, will retry:`,
+          `Transient error sending email for order ${fullMessage.orderId}, will retry:`,
           error
         );
         // Throw to let SQS retry after visibility timeout
@@ -135,7 +184,7 @@ export const handler: SQSHandler = async (event: SQSEvent): Promise<void> => {
       // For non-transient errors, also throw to allow retry up to maxReceiveCount
       // After max receives, message goes to DLQ
       console.error(
-        `Error sending email for order ${message.orderId}:`,
+        `Error sending email for order ${fullMessage.orderId}:`,
         error
       );
       throw error;
