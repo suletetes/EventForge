@@ -85,13 +85,21 @@ export function post<T>(path: string, body: unknown): Promise<ApiResponse<T>> {
 }
 
 /** Fetch recent events from the API */
-export function fetchEvents() {
-  return get<Array<{ eventType: string; timestamp: string; source: string }>>('/events');
+export async function fetchEvents(): Promise<ApiResponse<Array<{ eventType: string; timestamp: string; source: string }>>> {
+  const result = await get<{ events: Array<{ eventType: string; timestamp: string; source: string }> }>('/events');
+  if (result.data) {
+    return { data: result.data.events, error: null, status: result.status };
+  }
+  return { data: null, error: result.error, status: result.status };
 }
 
 /** Fetch user's orders from the API */
-export function fetchOrders() {
-  return get<Array<{ orderId: string; status: string; total: number; createdAt: string }>>('/orders');
+export async function fetchOrders(): Promise<ApiResponse<Array<{ orderId: string; status: string; total: number; createdAt: string }>>> {
+  const result = await get<{ orders: Array<{ orderId: string; status: string; total: number; createdAt: string }> }>('/orders');
+  if (result.data) {
+    return { data: result.data.orders, error: null, status: result.status };
+  }
+  return { data: null, error: result.error, status: result.status };
 }
 
 /** Fetch a single order by ID */
@@ -106,4 +114,30 @@ export function fetchOrder(orderId: string) {
     updatedAt: string;
     events: Array<{ eventType: string; timestamp: string; source: string }>;
   }>(`/orders/${orderId}`);
+}
+
+/** Create a new order */
+export interface CreateOrderPayload {
+  userId: string;
+  customerEmail: string;
+  items: Array<{ productId: string; name: string; quantity: number; price: number }>;
+  total: number;
+}
+
+export function createOrder(payload: CreateOrderPayload) {
+  return post<{ orderId: string; status: string; createdAt: string }>('/orders', payload);
+}
+
+/** List registered webhooks */
+export async function fetchWebhooks(): Promise<ApiResponse<Array<{ url: string; registeredAt: string }>>> {
+  const result = await get<{ webhooks: Array<{ url: string; registeredAt: string }> }>('/webhooks');
+  if (result.data) {
+    return { data: result.data.webhooks, error: null, status: result.status };
+  }
+  return { data: null, error: result.error, status: result.status };
+}
+
+/** Register a webhook URL */
+export function registerWebhook(url: string) {
+  return post<{ url: string; registeredAt: string }>('/webhooks', { url });
 }

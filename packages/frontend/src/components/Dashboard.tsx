@@ -12,6 +12,8 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { fetchEvents, fetchOrders } from '../api';
 import { EventList, EventItem } from './EventList';
 import { OrderStatus, OrderItem } from './OrderStatus';
+import { CreateOrder } from './CreateOrder';
+import { WebhookManager } from './WebhookManager';
 
 const POLL_INTERVAL_MS = 10_000;
 
@@ -67,6 +69,8 @@ export function Dashboard(_props: DashboardProps): React.ReactElement {
 
   return (
     <div className="dashboard">
+      <CreateOrder onOrderCreated={loadData} />
+      <WebhookManager />
       {(eventsError || ordersError) && (
         <div className="dashboard__error" role="alert">
           {eventsError && (
