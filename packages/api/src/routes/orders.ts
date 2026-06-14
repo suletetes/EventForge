@@ -68,6 +68,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
   const order: Order = {
     orderId,
     userId: req.userId!,
+    customerEmail: validatedOrder.customerEmail,
     status: 'pending',
     items: validatedOrder.items,
     total: validatedOrder.total,
@@ -83,7 +84,10 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
     await publishEvent('eventforge.api', 'order.created', {
       orderId: result.order.orderId,
       userId: result.order.userId,
+      customerEmail: result.order.customerEmail,
       status: result.order.status,
+      items: result.order.items,
+      total: result.order.total,
       timestamp: result.order.createdAt,
     });
 

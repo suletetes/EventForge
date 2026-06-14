@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, PutCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
 
 // Type augmentation for req.userId (set by auth middleware)
 declare global {
@@ -86,6 +86,36 @@ router.post('/', async (req: Request, res: Response) => {
     url,
     registeredAt,
   });
+});
+
+/**
+ * GET /api/webhooks
+ *
+ * Lists all registered webhook URLs for the current user.
+ */
+router.get('/', async (req: Request, res: Response) => {
+  try {
+    const result = await docClient.send(
+      new ScanCommand({
+        TableName: TABLE_NAME,
+        FilterExpression: 'SK = :sk AND begins_with(PK, :pkPrefix) AND userId = :uid',
+        ExpressionAttributeValues: {
+          ':sk': 'REGISTRATION',
+          ':pkPrefix': 'WEBHOOK#',
+          ':uid': req.userId,
+        },
+      })
+    );
+
+    const webhooks = (result.Items || []).map((item) => ({
+      url: item.url,
+      registeredAt: item.registeredAt,
+    }));
+
+    res.status(200).json({ webhooks });
+  } catch {
+    res.status(500).json({ error: 'Internal Server Error', message: 'Failed to list webhooks' });
+  }
 });
 
 export { router as webhooksRouter };
