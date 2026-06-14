@@ -243,6 +243,10 @@ Resources:
         ECSTaskRoleArn: !GetAtt IAMStack.Outputs.ECSTaskRoleArn
         ECSTaskExecutionRoleArn: !GetAtt IAMStack.Outputs.ECSTaskExecutionRoleArn
         ContainerImage: !Ref ContainerImage
+        CognitoUserPoolId: !GetAtt CognitoStack.Outputs.UserPoolId
+        DynamoDBTableName: !GetAtt DynamoDBStack.Outputs.TableName
+        EventBusName: !Sub '${EnvironmentName}-eventforge-bus'
+        ReceiptsBucketName: !Ref ReceiptsBucket
         EcsMinTasks: !Ref EcsMinTasks
         EcsMaxTasks: !Ref EcsMaxTasks
       Tags:
@@ -273,42 +277,6 @@ Resources:
           Value: !Ref EnvironmentName
         - Key: StackLayer
           Value: eventing
-
-  # =============================================================
-  # Layer 5: Webhook Ingestion Lambda
-  # Defined here for API Gateway integration
-  # =============================================================
-  WebhookIngestFunction:
-    Type: AWS::Serverless::Function
-    DependsOn:
-      - EventBridgeStack
-    Properties:
-      FunctionName: !Sub '${EnvironmentName}-eventforge-webhook-ingest'
-      Runtime: nodejs20.x
-      Handler: index.handler
-      CodeUri: packages/lambdas/dist/ingestion/
-      MemorySize: 128
-      Timeout: 30
-      Tracing: Active
-      Environment:
-        Variables:
-          EVENT_BUS_NAME: !GetAtt EventBridgeStack.Outputs.EventBusName
-          ENVIRONMENT: !Ref EnvironmentName
-      Policies:
-        - EventBridgePutEventsPolicy:
-            EventBusName: !GetAtt EventBridgeStack.Outputs.EventBusName
-        - Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Action:
-                - xray:PutTraceSegments
-                - xray:PutTelemetryRecords
-                - xray:GetSamplingRules
-                - xray:GetSamplingTargets
-              Resource: '*'
-      Tags:
-        Environment: !Ref EnvironmentName
-        Project: EventForge
 
   # =============================================================
   # Layer 5: Lambda Processor Functions (depends on IAM, SQS)
@@ -346,12 +314,12 @@ Resources:
   APIGatewayStack:
     Type: AWS::CloudFormation::Stack
     DependsOn:
-      - WebhookIngestFunction
+      - LambdasStack
     Properties:
       TemplateURL: packages/infra/templates/apigateway.yaml
       Parameters:
         EnvironmentName: !Ref EnvironmentName
-        WebhookIngestFunctionArn: !GetAtt WebhookIngestFunction.Arn
+        WebhookIngestFunctionArn: !GetAtt LambdasStack.Outputs.WebhookIngestFunctionArn
       Tags:
         - Key: Environment
           Value: !Ref EnvironmentName
@@ -360,18 +328,38 @@ Resources:
 
   # =============================================================
   # Layer 6: CloudFront + S3 Dashboard Hosting
+  # Deployed separately after main stack (circular dep with OAC)
   # =============================================================
-  CloudFrontStack:
-    Type: AWS::CloudFormation::Stack
+  DashboardBucket:
+    Type: AWS::S3::Bucket
     Properties:
-      TemplateURL: packages/infra/templates/cloudfront.yaml
-      Parameters:
-        EnvironmentName: !Ref EnvironmentName
+      BucketName: !Sub '${EnvironmentName}-eventforge-dashboard-${AWS::AccountId}'
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
       Tags:
         - Key: Environment
           Value: !Ref EnvironmentName
-        - Key: StackLayer
-          Value: cdn
+        - Key: Project
+          Value: EventForge
+
+  DashboardBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref DashboardBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Sub 'arn:aws:s3:::${EnvironmentName}-eventforge-dashboard-${AWS::AccountId}/*'
 
   # =============================================================
   # Layer 7: CloudWatch Alarms (depends on SQS DLQ names)
@@ -475,13 +463,13 @@ Outputs:
     Value: !GetAtt APIGatewayStack.Outputs.WebhookApiEndpoint
 
   # CDN
-  CloudFrontDomain:
-    Description: CloudFront distribution domain for the Dashboard
-    Value: !GetAtt CloudFrontStack.Outputs.CloudFrontDistributionDomainName
+  DashboardUrl:
+    Description: Dashboard website URL
+    Value: !Sub 'http://${EnvironmentName}-eventforge-dashboard-${AWS::AccountId}.s3-website-us-east-1.amazonaws.com'
 
   DashboardBucketName:
     Description: S3 bucket for Dashboard static files
-    Value: !GetAtt CloudFrontStack.Outputs.DashboardBucketName
+    Value: !Ref DashboardBucket
 
   # Observability
   AlertsTopicArn:
