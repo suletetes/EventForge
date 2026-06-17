@@ -1,9 +1,6 @@
 /**
  * EventList component displaying the 50 most recent events.
  * Validates: Requirements 9.3
- *
- * Renders events in a table showing eventType, source, and timestamp.
- * Receives events as props from the parent Dashboard component.
  */
 
 import React from 'react';
@@ -22,44 +19,44 @@ export interface EventListProps {
 export function EventList({ events, loading }: EventListProps): React.ReactElement {
   if (loading && events.length === 0) {
     return (
-      <div className="event-list event-list--loading">
-        <h2>Recent Events</h2>
-        <p>Loading events...</p>
+      <div className="event-list__empty">
+        <div className="spinner" style={{ margin: '0 auto 8px' }} />
+        Loading events...
       </div>
     );
   }
 
   if (events.length === 0) {
     return (
-      <div className="event-list event-list--empty">
-        <h2>Recent Events</h2>
-        <p>No events to display.</p>
+      <div className="event-list__empty">
+        No events to display yet. Create an order to generate events.
       </div>
     );
   }
 
   return (
-    <div className="event-list">
-      <h2>Recent Events</h2>
+    <div style={{ overflowX: 'auto' }}>
       <table className="event-list__table">
         <thead>
           <tr>
             <th>Event Type</th>
             <th>Source</th>
-            <th>Timestamp</th>
+            <th>Time</th>
           </tr>
         </thead>
         <tbody>
           {events.slice(0, 50).map((event, index) => (
-            <tr key={`${event.timestamp}-${index}`} className="event-list__row">
-              <td className="event-list__cell event-list__cell--type">
-                {event.eventType}
+            <tr key={`${event.timestamp}-${index}`}>
+              <td>
+                <span className="event-list__type-badge">{event.eventType}</span>
               </td>
-              <td className="event-list__cell event-list__cell--source">
-                {event.source}
+              <td>
+                <span className="event-list__source">{event.source}</span>
               </td>
-              <td className="event-list__cell event-list__cell--timestamp">
-                {new Date(event.timestamp).toLocaleString()}
+              <td>
+                <span className="event-list__time">
+                  {new Date(event.timestamp).toLocaleString()}
+                </span>
               </td>
             </tr>
           ))}

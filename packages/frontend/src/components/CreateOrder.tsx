@@ -59,39 +59,39 @@ export function CreateOrder({ onOrderCreated }: CreateOrderProps): React.ReactEl
     if (result.error) {
       setError(result.error);
     } else {
-      setSuccess(`Order ${result.data?.orderId} created`);
+      setSuccess(`Order ${result.data?.orderId} created successfully`);
       setEmail('');
       setItems([{ productId: '', name: '', quantity: 1, price: 0 }]);
       onOrderCreated();
     }
   }
 
-  const inputStyle = { padding: '6px 10px', border: '1px solid #ddd', borderRadius: 4, fontSize: 14 };
+  const total = items.reduce((s, i) => s + i.quantity * i.price, 0);
 
   return (
-    <div style={{ border: '1px solid #e0e0e0', borderRadius: 8, padding: 16, marginBottom: 20 }}>
-      <h3 style={{ margin: '0 0 12px' }}>Create Order</h3>
-      {error && <p style={{ color: 'red', fontSize: 13 }}>{error}</p>}
-      {success && <p style={{ color: 'green', fontSize: 13 }}>{success}</p>}
-      <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: 10 }}>
-          <input
-            type="email"
-            placeholder="Customer email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
-          />
-        </div>
+    <div className="card">
+      <div className="card__header">
+        <h2 className="card__title">Create Order</h2>
+      </div>
+      {error && <div className="create-order__error">{error}</div>}
+      {success && <div className="create-order__success">{success}</div>}
+      <form className="create-order__form" onSubmit={handleSubmit}>
+        <input
+          type="email"
+          placeholder="Customer email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+          className="create-order__input"
+        />
         {items.map((item, idx) => (
-          <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+          <div key={idx} className="create-order__item-row">
             <input
-              placeholder="Name"
+              placeholder="Item name"
               value={item.name}
               onChange={(e) => updateItem(idx, 'name', e.target.value)}
               required
-              style={{ ...inputStyle, flex: 2 }}
+              className="create-order__input create-order__input--name"
             />
             <input
               type="number"
@@ -100,7 +100,7 @@ export function CreateOrder({ onOrderCreated }: CreateOrderProps): React.ReactEl
               value={item.quantity}
               onChange={(e) => updateItem(idx, 'quantity', parseInt(e.target.value) || 1)}
               required
-              style={{ ...inputStyle, width: 60 }}
+              className="create-order__input create-order__input--qty"
             />
             <input
               type="number"
@@ -110,20 +110,33 @@ export function CreateOrder({ onOrderCreated }: CreateOrderProps): React.ReactEl
               value={item.price || ''}
               onChange={(e) => updateItem(idx, 'price', parseFloat(e.target.value) || 0)}
               required
-              style={{ ...inputStyle, width: 80 }}
+              className="create-order__input create-order__input--price"
             />
             {items.length > 1 && (
-              <button type="button" onClick={() => removeItem(idx)} style={{ padding: '4px 8px', cursor: 'pointer' }}>×</button>
+              <button
+                type="button"
+                onClick={() => removeItem(idx)}
+                className="create-order__remove-btn"
+                aria-label="Remove item"
+              >
+                ×
+              </button>
             )}
           </div>
         ))}
-        <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
-          <button type="button" onClick={addItem} style={{ padding: '6px 12px', cursor: 'pointer' }}>+ Item</button>
-          <button type="submit" disabled={submitting} style={{ padding: '6px 16px', background: '#0066cc', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
+        <div className="create-order__actions">
+          <button type="button" onClick={addItem} className="create-order__add-btn">
+            + Add Item
+          </button>
+          <button
+            type="submit"
+            disabled={submitting}
+            className="create-order__submit-btn"
+          >
             {submitting ? 'Creating...' : 'Place Order'}
           </button>
-          <span style={{ alignSelf: 'center', fontSize: 13, color: '#666' }}>
-            Total: ${items.reduce((s, i) => s + i.quantity * i.price, 0).toFixed(2)}
+          <span className="create-order__total">
+            ${total.toFixed(2)}
           </span>
         </div>
       </form>

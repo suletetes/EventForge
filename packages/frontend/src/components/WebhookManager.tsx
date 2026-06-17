@@ -32,33 +32,42 @@ export function WebhookManager(): React.ReactElement {
     }
   }
 
-  const inputStyle = { padding: '6px 10px', border: '1px solid #ddd', borderRadius: 4, fontSize: 14 };
-
   return (
-    <div style={{ border: '1px solid #e0e0e0', borderRadius: 8, padding: 16, marginBottom: 20 }}>
-      <h3 style={{ margin: '0 0 12px' }}>Webhook Subscriptions</h3>
-      {error && <p style={{ color: 'red', fontSize: 13 }}>{error}</p>}
-      <form onSubmit={handleRegister} style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+    <div className="card">
+      <div className="card__header">
+        <h2 className="card__title">Webhook Subscriptions</h2>
+        <span className="card__badge" style={{ background: 'var(--accent-glow)', color: 'var(--accent)' }}>
+          {webhooks.length} active
+        </span>
+      </div>
+      {error && <div className="create-order__error">{error}</div>}
+      <form className="webhook__form" onSubmit={handleRegister}>
         <input
           type="url"
           placeholder="https://your-endpoint.com/webhook"
           value={newUrl}
           onChange={(e) => setNewUrl(e.target.value)}
           required
-          style={{ ...inputStyle, flex: 1 }}
+          className="webhook__input"
         />
-        <button type="submit" disabled={submitting} style={{ padding: '6px 14px', background: '#0066cc', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
+        <button
+          type="submit"
+          disabled={submitting}
+          className="webhook__register-btn"
+        >
           {submitting ? '...' : 'Register'}
         </button>
       </form>
       {webhooks.length === 0 ? (
-        <p style={{ fontSize: 13, color: '#666' }}>No webhooks registered.</p>
+        <p className="webhook__empty">No webhooks registered yet.</p>
       ) : (
-        <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+        <ul className="webhook__list">
           {webhooks.map((wh) => (
-            <li key={wh.url} style={{ fontSize: 13, padding: '4px 0', borderBottom: '1px solid #f0f0f0' }}>
-              <code style={{ fontSize: 12 }}>{wh.url}</code>
-              <span style={{ color: '#999', marginLeft: 8 }}>since {new Date(wh.registeredAt).toLocaleDateString()}</span>
+            <li key={wh.url} className="webhook__item">
+              <span className="webhook__url">{wh.url}</span>
+              <span className="webhook__date">
+                since {new Date(wh.registeredAt).toLocaleDateString()}
+              </span>
             </li>
           ))}
         </ul>

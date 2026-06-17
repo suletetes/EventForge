@@ -1,11 +1,6 @@
 /**
  * Main Dashboard component with 10-second polling.
  * Validates: Requirements 9.3, 9.4, 9.7
- *
- * - Polls /api/events every 10 seconds
- * - On success, updates state with new events
- * - On failure, shows error indicator but keeps previous data, retries on next cycle
- * - Cleans up interval on unmount
  */
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
@@ -17,9 +12,7 @@ import { WebhookManager } from './WebhookManager';
 
 const POLL_INTERVAL_MS = 10_000;
 
-export interface DashboardProps {}
-
-export function Dashboard(_props: DashboardProps): React.ReactElement {
+export function Dashboard(): React.ReactElement {
   const [events, setEvents] = useState<EventItem[]>([]);
   const [orders, setOrders] = useState<OrderItem[]>([]);
   const [eventsError, setEventsError] = useState<string | null>(null);
@@ -28,21 +21,17 @@ export function Dashboard(_props: DashboardProps): React.ReactElement {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadData = useCallback(async () => {
-    // Fetch events
     const eventsResponse = await fetchEvents();
     if (eventsResponse.error) {
       setEventsError(eventsResponse.error);
-      // Keep previous data on failure, retry on next cycle
     } else if (eventsResponse.data) {
       setEvents(eventsResponse.data.slice(0, 50));
       setEventsError(null);
     }
 
-    // Fetch orders
     const ordersResponse = await fetchOrders();
     if (ordersResponse.error) {
       setOrdersError(ordersResponse.error);
-      // Keep previous data on failure, retry on next cycle
     } else if (ordersResponse.data) {
       setOrders(ordersResponse.data);
       setOrdersError(null);
@@ -52,13 +41,8 @@ export function Dashboard(_props: DashboardProps): React.ReactElement {
   }, []);
 
   useEffect(() => {
-    // Initial data load
     loadData();
-
-    // Set up polling at 10-second intervals
     intervalRef.current = setInterval(loadData, POLL_INTERVAL_MS);
-
-    // Clean up interval on unmount
     return () => {
       if (intervalRef.current !== null) {
         clearInterval(intervalRef.current);
@@ -69,29 +53,46 @@ export function Dashboard(_props: DashboardProps): React.ReactElement {
 
   return (
     <div className="dashboard">
-      <CreateOrder onOrderCreated={loadData} />
-      <WebhookManager />
       {(eventsError || ordersError) && (
         <div className="dashboard__error" role="alert">
           {eventsError && (
             <p className="dashboard__error-message">
-              Events error: {eventsError}. Retrying...
+              Events: {eventsError}. Retrying...
             </p>
           )}
           {ordersError && (
             <p className="dashboard__error-message">
-              Orders error: {ordersError}. Retrying...
+              Orders: {ordersError}. Retrying...
             </p>
           )}
         </div>
       )}
-      <div className="dashboard__content">
-        <section className="dashboard__section dashboard__section--events">
+
+      <div className="dashboard__grid-top">
+        <CreateOrder onOrderCreated={loadData} />
+        <WebhookManager />
+      </div>
+
+      <div className="dashboard__grid-bottom">
+        <div className="card">
+          <div className="card__header">
+            <h2 className="card__title">Recent Events</h2>
+            <span className="card__badge" style={{ background: 'var(--accent-glow)', color: 'var(--accent)' }}>
+              {events.length} events
+            </span>
+          </div>
           <EventList events={events} loading={loading} />
-        </section>
-        <section className="dashboard__section dashboard__section--orders">
+        </div>
+
+        <div className="card">
+          <div className="card__header">
+            <h2 className="card__title">Order Status</h2>
+            <span className="card__badge" style={{ background: 'var(--accent-glow)', color: 'var(--accent)' }}>
+              {orders.length} orders
+            </span>
+          </div>
           <OrderStatus orders={orders} loading={loading} />
-        </section>
+        </div>
       </div>
     </div>
   );

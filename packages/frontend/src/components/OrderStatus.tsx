@@ -1,9 +1,6 @@
 /**
  * OrderStatus component showing order status and current workflow step.
  * Validates: Requirements 9.4
- *
- * Displays each order's status and maps it to the current workflow step:
- * ValidateOrder, ReserveInventory, ChargePayment, ConfirmOrder, or Failed.
  */
 
 import React from 'react';
@@ -20,7 +17,6 @@ export interface OrderStatusProps {
   loading: boolean;
 }
 
-/** Workflow steps in processing order */
 const WORKFLOW_STEPS = [
   'ValidateOrder',
   'ReserveInventory',
@@ -28,9 +24,6 @@ const WORKFLOW_STEPS = [
   'ConfirmOrder',
 ] as const;
 
-/**
- * Maps an order status to the current workflow step display value.
- */
 function getWorkflowStep(status: string): string {
   switch (status) {
     case 'pending':
@@ -48,76 +41,75 @@ function getWorkflowStep(status: string): string {
   }
 }
 
-/**
- * Returns a CSS modifier class based on the order status.
- */
-function getStatusClass(status: string): string {
+function getStatusBadgeClass(status: string): string {
   switch (status) {
     case 'completed':
-      return 'order-status__badge--completed';
+      return 'status-badge status-badge--completed';
     case 'failed':
-      return 'order-status__badge--failed';
+      return 'status-badge status-badge--failed';
     case 'pending':
-      return 'order-status__badge--pending';
+      return 'status-badge status-badge--pending';
     case 'processing':
     case 'charging':
-      return 'order-status__badge--processing';
+      return 'status-badge status-badge--processing';
     default:
-      return '';
+      return 'status-badge';
   }
 }
 
 export function OrderStatus({ orders, loading }: OrderStatusProps): React.ReactElement {
   if (loading && orders.length === 0) {
     return (
-      <div className="order-status order-status--loading">
-        <h2>Order Status</h2>
-        <p>Loading orders...</p>
+      <div className="order-status__empty">
+        <div className="spinner" style={{ margin: '0 auto 8px' }} />
+        Loading orders...
       </div>
     );
   }
 
   if (orders.length === 0) {
     return (
-      <div className="order-status order-status--empty">
-        <h2>Order Status</h2>
-        <p>No orders to display.</p>
+      <div className="order-status__empty">
+        No orders yet. Place your first order above.
       </div>
     );
   }
 
   return (
-    <div className="order-status">
-      <h2>Order Status</h2>
+    <div style={{ overflowX: 'auto' }}>
       <table className="order-status__table">
         <thead>
           <tr>
             <th>Order ID</th>
             <th>Status</th>
-            <th>Workflow Step</th>
+            <th>Step</th>
             <th>Total</th>
             <th>Created</th>
           </tr>
         </thead>
         <tbody>
           {orders.map((order) => (
-            <tr key={order.orderId} className="order-status__row">
-              <td className="order-status__cell order-status__cell--id">
-                {order.orderId}
+            <tr key={order.orderId}>
+              <td>
+                <span className="order-status__id">
+                  {order.orderId.slice(0, 10)}...
+                </span>
               </td>
-              <td className="order-status__cell order-status__cell--status">
-                <span className={`order-status__badge ${getStatusClass(order.status)}`}>
+              <td>
+                <span className={getStatusBadgeClass(order.status)}>
                   {order.status}
                 </span>
               </td>
-              <td className="order-status__cell order-status__cell--step">
-                {getWorkflowStep(order.status)}
+              <td>
+                <span className="workflow-step">{getWorkflowStep(order.status)}</span>
               </td>
-              <td className="order-status__cell order-status__cell--total">
-                ${order.total.toFixed(2)}
+              <td>
+                <span className="order-total">${order.total.toFixed(2)}</span>
               </td>
-              <td className="order-status__cell order-status__cell--created">
-                {new Date(order.createdAt).toLocaleString()}
+              <td>
+                <span className="event-list__time">
+                  {new Date(order.createdAt).toLocaleString()}
+                </span>
               </td>
             </tr>
           ))}
