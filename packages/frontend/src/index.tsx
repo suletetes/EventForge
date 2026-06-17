@@ -9,6 +9,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { configureAuth } from './auth';
 import { App } from './App';
+import './styles.css';
 
 // Initialize Cognito authentication configuration
 configureAuth();

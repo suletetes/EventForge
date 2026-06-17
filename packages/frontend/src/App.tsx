@@ -45,51 +45,76 @@ export function App(): React.ReactElement {
   }
 
   if (authState === 'loading') {
-    return <div style={{ padding: 40, textAlign: 'center' }}>Loading...</div>;
+    return (
+      <div className="loading-page">
+        <div className="spinner" />
+        <span>Loading EventForge...</span>
+      </div>
+    );
   }
 
   if (authState === 'unauthenticated') {
     return (
-      <div style={{ maxWidth: 400, margin: '80px auto', padding: 20, fontFamily: 'system-ui' }}>
-        <h1 style={{ fontSize: 24 }}>EventForge</h1>
-        <p style={{ color: '#666' }}>Sign in to view the event dashboard</p>
-        {error && <p style={{ color: 'red' }}>{error}</p>}
-        <form onSubmit={handleLogin}>
-          <input
-            type="email"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            style={{ display: 'block', width: '100%', padding: 10, marginBottom: 10, boxSizing: 'border-box' }}
-            required
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            style={{ display: 'block', width: '100%', padding: 10, marginBottom: 10, boxSizing: 'border-box' }}
-            required
-          />
-          <button
-            type="submit"
-            disabled={loggingIn}
-            style={{ width: '100%', padding: 12, background: '#0066cc', color: 'white', border: 'none', cursor: 'pointer' }}
-          >
-            {loggingIn ? 'Signing in...' : 'Sign In'}
-          </button>
-        </form>
+      <div className="login-page">
+        <div className="login-card">
+          <div className="login-card__logo">
+            <div className="login-card__logo-icon">⚡</div>
+            <h1 className="login-card__title">EventForge</h1>
+          </div>
+          <p className="login-card__subtitle">Sign in to access the event dashboard</p>
+          {error && <div className="login-card__error">{error}</div>}
+          <form className="login-card__form" onSubmit={handleLogin}>
+            <input
+              type="email"
+              placeholder="Email address"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="login-card__input"
+              required
+              autoComplete="email"
+            />
+            <input
+              type="password"
+              placeholder="Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="login-card__input"
+              required
+              autoComplete="current-password"
+            />
+            <button
+              type="submit"
+              disabled={loggingIn}
+              className="login-card__button"
+            >
+              {loggingIn ? 'Signing in...' : 'Sign In'}
+            </button>
+          </form>
+        </div>
       </div>
     );
   }
 
   return (
-    <div style={{ fontFamily: 'system-ui', padding: 20 }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <h1 style={{ fontSize: 20, margin: 0 }}>EventForge Dashboard</h1>
-        <button onClick={handleLogout} style={{ padding: '8px 16px', cursor: 'pointer' }}>Sign Out</button>
+    <div className="app-shell">
+      <header className="app-header">
+        <div className="app-header__brand">
+          <div className="app-header__icon">⚡</div>
+          <span className="app-header__title">EventForge</span>
+        </div>
+        <div className="app-header__nav">
+          <span className="app-header__status">
+            <span className="app-header__status-dot" />
+            Live
+          </span>
+          <button onClick={handleLogout} className="app-header__logout">
+            Sign Out
+          </button>
+        </div>
       </header>
-      <Dashboard />
+      <main className="app-main">
+        <Dashboard />
+      </main>
     </div>
   );
 }
