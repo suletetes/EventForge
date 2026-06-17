@@ -95,13 +95,17 @@ jobs:
           VITE_API_BASE_URL: http://${{ steps.stack-outputs.outputs.ALB_DNS }}
         run: npm run build --prefix packages/frontend
 
+      - name: Get AWS Account ID
+        id: aws-account
+        run: echo "ID=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_OUTPUT
+
       - name: Deploy frontend to S3
         run: |
           aws s3 sync packages/frontend/dist/ \
-            s3://${{ env.ENVIRONMENT }}-eventforge-dashboard-${{ secrets.ACCOUNT_ID }}/ \
+            s3://${{ env.ENVIRONMENT }}-eventforge-dashboard-${{ steps.aws-account.outputs.ID }}/ \
             --delete --region ${{ env.AWS_REGION }}
 
       - name: Print dashboard URL
         run: |
-          echo "Dashboard: http://${{ env.ENVIRONMENT }}-eventforge-dashboard-${{ secrets.ACCOUNT_ID }}.s3-website-${{ env.AWS_REGION }}.amazonaws.com"
+          echo "Dashboard: http://${{ env.ENVIRONMENT }}-eventforge-dashboard-${{ steps.aws-account.outputs.ID }}.s3-website-${{ env.AWS_REGION }}.amazonaws.com"
           echo "API: http://${{ steps.stack-outputs.outputs.ALB_DNS }}/health"
