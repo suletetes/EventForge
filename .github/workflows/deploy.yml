@@ -98,10 +98,10 @@ jobs:
       - name: Deploy frontend to S3
         run: |
           aws s3 sync packages/frontend/dist/ \
-            s3://${{ env.ENVIRONMENT }}-eventforge-dashboard-${{ secrets.AWS_ACCOUNT_ID }}/ \
+            s3://${{ env.ENVIRONMENT }}-eventforge-dashboard-${{ secrets.ACCOUNT_ID }}/ \
             --delete --region ${{ env.AWS_REGION }}
 
       - name: Print dashboard URL
         run: |
-          echo "Dashboard: http://${{ env.ENVIRONMENT }}-eventforge-dashboard-${{ secrets.AWS_ACCOUNT_ID }}.s3-website-${{ env.AWS_REGION }}.amazonaws.com"
+          echo "Dashboard: http://${{ env.ENVIRONMENT }}-eventforge-dashboard-${{ secrets.ACCOUNT_ID }}.s3-website-${{ env.AWS_REGION }}.amazonaws.com"
           echo "API: http://${{ steps.stack-outputs.outputs.ALB_DNS }}/health"
